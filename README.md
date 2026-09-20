@@ -44,14 +44,19 @@ Data assets remain in their native specialized storage layers (SQLite FTS5, Chro
 | Chamber | Designation | Silnik / Adapter | Specialized Role |
 |---|---|---|---|
 | **01** | Eye of Shaolin | SQLite FTS5 / `sist2` | High-throughput text indexing & forensic filesystem search |
-| **02** | Web Crawler & Edge | HTTP (Zen Surfx) | Outbound HTTP retrieval & edge scraping |
+| **02** | Web Crawler & Edge | HTTP (planned) | Not implemented; no public adapter contract yet |
 | **03** | Grand Knowledge | ChromaDB | Semantic embeddings for core engineering & repository knowledge |
 | **04** | Memory Palace | ChromaDB / MemPalace | Long-term episodic memory, associative recall & drawers |
 | **05** | Graph of Truth | SQLite Triples | Entity relationships, knowledge graph facts & assertions |
 | **06** | The Iron Fist | Four-Room Security Gate | Mutation blocking, SHA-256 verification & ingestion quarantine |
-| **07** | Vector Micro-Engine | `sqlite-vec` + `fastembed` | Fast in-process vector similarity and local embeddings |
+| **07** | Vector Micro-Engine | Planned | Not implemented; database schema and embedding model are undecided |
 | **08** | Store & Operations | SQLite (read-only) | Transactional operational store, sessions, chat history |
-| **36** | **The 36th Chamber** | **Master Orchestrator** | **Multi-threaded query routing, evidence synthesis, telemetry** |
+| **36** | **The 36th Chamber** | **Master Orchestrator** | **Multi-threaded routing, deterministic evidence aggregation, telemetry** |
+
+The registry is the executable capability contract. Only entries with
+`status: implemented`, a registered `adapter`, and compatible `route_modes` may be routed.
+Chamber 36 does not currently perform LLM synthesis; responses expose
+`answer_mode: evidence_aggregation` and preserve the normalized source evidence.
 
 ---
 

@@ -1,13 +1,15 @@
 {
   "system": "36_CHAMBERS_SHAOLIN_COGNITIVE_MATRIX",
-  "version": "1.0.0-example",
+  "version": "1.1.0-example",
   "updated_at": "2026-09-20T00:00:00Z",
   "master_orchestrator": {
     "chamber_id": 36,
     "name": "The 36th Chamber (The Buch Master Engine)",
-    "role": "Federation, Synthesis, Evaluation & Telemetry",
+    "role": "Federation, Evidence Aggregation, Evaluation & Telemetry",
     "engine": "FastAPI / Python Hybrid Orchestrator",
-    "status": "ACTIVE"
+    "status": "orchestration_only",
+    "synthesis_status": "not_implemented",
+    "answer_mode": "evidence_aggregation"
   },
   "chambers": [
     {
@@ -15,7 +17,10 @@
       "name": "Eye of Shaolin",
       "specialization": "Fast filesystem text index & forensic search",
       "engine": "SQLite FTS5 / sist2",
-      "path": "./examples/demo_data/sist2_demo.db",
+      "physical_path": "./examples/demo_data/sist2",
+      "status": "implemented",
+      "adapter": "sist2",
+      "route_modes": ["fts"],
       "access_mode": "read_only"
     },
     {
@@ -23,15 +28,20 @@
       "name": "Web Crawler & Edge",
       "specialization": "External HTTP search and scraping",
       "engine": "HTTP Client",
-      "endpoint": "http://localhost:8888",
-      "access_mode": "read_only"
+      "physical_path": "http://localhost:8888",
+      "status": "not_implemented",
+      "access_mode": "read_only",
+      "notes": "No HTTP request/response adapter contract exists in the public implementation."
     },
     {
       "id": 3,
       "name": "Grand Knowledge",
       "specialization": "Semantic embeddings for technical repository knowledge",
       "engine": "ChromaDB",
-      "path": "./examples/demo_data/chroma_kb",
+      "physical_path": "./examples/demo_data/chroma_kb",
+      "status": "implemented",
+      "adapter": "chroma_devz",
+      "route_modes": ["semantic"],
       "access_mode": "read_only"
     },
     {
@@ -39,7 +49,10 @@
       "name": "Memory Palace",
       "specialization": "Long-term episodic and semantic memory",
       "engine": "ChromaDB / MemPalace",
-      "path": "./examples/demo_data/mempalace",
+      "physical_path": "./examples/demo_data/mempalace",
+      "status": "implemented",
+      "adapter": "chroma_mempalace",
+      "route_modes": ["semantic"],
       "access_mode": "read_only"
     },
     {
@@ -47,7 +60,10 @@
       "name": "Graph of Truth",
       "specialization": "Knowledge graph entities and relational facts",
       "engine": "SQLite Triples",
-      "path": "./examples/demo_data/knowledge_graph.sqlite3",
+      "physical_path": "./examples/demo_data/knowledge_graph.sqlite3",
+      "status": "implemented",
+      "adapter": "graph_sqlite",
+      "route_modes": ["graph_sql"],
       "access_mode": "read_only"
     },
     {
@@ -55,31 +71,41 @@
       "name": "The Iron Fist",
       "specialization": "Security policy gate, mutation blocking & four-room quarantine",
       "engine": "Policy Engine / ACL Gate",
-      "path": "./runtime/security",
+      "physical_path": "./runtime/security",
+      "status": "implemented",
+      "adapter": "policy_gate",
+      "route_modes": ["policy_gate"],
       "access_mode": "security_enforcer"
     },
     {
       "id": 7,
       "name": "Vector Micro-Engine",
-      "specialization": "In-process vector similarity",
-      "engine": "sqlite-vec / fastembed",
-      "access_mode": "read_only"
+      "specialization": "Planned in-process vector similarity",
+      "engine": "unselected",
+      "status": "not_implemented",
+      "access_mode": "read_only",
+      "notes": "No vec_docs database, stable row schema, embedding model, or executable adapter is shipped."
     },
     {
       "id": 8,
       "name": "Store & Operations",
       "specialization": "Operational chat and transactional records",
       "engine": "SQLite",
-      "path": "./examples/demo_data/chat_demo.db",
+      "physical_path": "./examples/demo_data/chat_demo.db",
+      "status": "implemented",
+      "adapter": "commerce_sqlite",
+      "route_modes": ["sql"],
       "access_mode": "read_only"
     },
     {
       "id": 36,
       "name": "The 36th Chamber",
-      "specialization": "Supreme cognitive synthesis and command orchestration",
+      "specialization": "Deterministic routing, evidence aggregation, and telemetry",
       "engine": "The Buch Master Engine",
-      "path": "./src/orchestrator",
-      "access_mode": "master"
+      "physical_path": "./src/orchestrator",
+      "status": "orchestration_only",
+      "access_mode": "master",
+      "notes": "Generative synthesis is not implemented; answers are normalized evidence packs."
     }
   ]
 }

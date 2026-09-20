@@ -38,7 +38,7 @@ Chamber 36: Shaolin Orchestrator
       +-- Route ----> select chambers and retrieval modes
       +-- Retrieve -> parallel, bounded adapters
       +-- Verify ---> source checks, dedupe, conflict handling
-      +-- Aggregate -> evidence pack and answer synthesis
+      +-- Aggregate -> deterministic evidence pack (no generative synthesis yet)
       +-- Observe --> JSONL / SQLite trace / evaluation metrics
       |
       v
@@ -50,14 +50,14 @@ Answer with provenance
 | Chamber | Function | Primary location | Engine / access mode | Default safety |
 |---|---|---|---|---|
 | 01 — Eye of Shaolin | Lexical discovery across indexed files | `$SIST2_DATA_ROOT` | sist2 / SQLite / FTS5 | Read-only |
-| 02 — Web Crawler & Edge Search | External or local web retrieval | `localhost:8888` | HTTP service | Read-only |
+| 02 — Web Crawler & Edge Search | Planned external or local web retrieval | Registry endpoint | Not implemented | Read-only |
 | 03 — Grand Knowledge | DEVz technical knowledge | `$DEVZ_KB_ROOT\chroma_db_v2` | ChromaDB + SQLite + HNSW | Read-only |
 | 04 — Memory Palace | Long-term semantic memory | `$MEMPALACE_ROOT\palace` | ChromaDB + SQLite + HNSW | Read-only; privacy-sensitive |
 | 05 — Graph of Truth | Entities, facts, and relations | `$MEMPALACE_ROOT\knowledge_graph.sqlite3` | SQLite graph schema | Read-only |
 | 06 — Iron Fist | Controlled code and terminal execution | `<CLI tools directory>` | CLI tools | Explicit approval for writes/execution |
-| 07 — Vector Micro-Engine | Local embedding and vector operations | `$SIST2_DATA_ROOT\vec0.dll` | sqlite-vec + fastembed | Read-only for search; isolated writes |
+| 07 — Vector Micro-Engine | Planned local embedding and vector operations | Not defined | Not implemented | No route |
 | 08 — Store & Commerce Ops | Commercial data | `$THE_BUCH_ROOT\backend\meblepumo.db` | SQLite | Read-only; sensitive business data |
-| 36 — The Buch / Jimbo | Planning, orchestration, audit | `$THE_BUCH_ROOT` | Python agents + tool server | Coordinates policy |
+| 36 — The Buch / Jimbo | Routing, evidence aggregation, audit | `$THE_BUCH_ROOT` | Python orchestrator | Coordinates policy; no LLM synthesis |
 
 ## Orchestrator Contract
 
@@ -94,6 +94,8 @@ Answer with provenance
 ```json
 {
   "answer": "...",
+  "answer_mode": "evidence_aggregation",
+  "synthesis": {"chamber_id": 36, "status": "not_implemented"},
   "sources": [{"chamber_id": 3, "path": "...", "record_id": "...", "score": 0.82}],
   "warnings": [],
   "metrics": {"total_latency_ms": 0}
@@ -118,8 +120,8 @@ Answer with provenance
 | Entity relation / provenance | 05 | 03 | graph traversal then semantic |
 | Commerce / operations | 08 | 01 | parameterized SQL then lexical |
 | Code execution request | 06 | 36 | policy gate before execution |
-| Vector diagnostics | 07 | 01 | sqlite-vec diagnostics / FTS |
-| Broad research | 03, 01, 02 | 05 | bounded multi-source |
+| Vector diagnostics | 01 | 03 | FTS / semantic (Chamber 07 is not implemented) |
+| Broad research | 03, 01 | 05 | bounded multi-source (Chamber 02 is not implemented) |
 
 ## Observability
 

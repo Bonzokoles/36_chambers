@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import subprocess
 import sys
@@ -14,21 +15,23 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 # Host-specific paths resolve from environment via config.py (see .env.example).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import path as env_path, require as require_path
-
-import yaml
+from config import path as env_path
+from config import require as require_path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-DEFAULT_GOLDEN = require_path("CHAMBERS_GOLDEN_QUERIES")
-DEFAULT_OUTPUT = require_path("CHAMBERS_EVAL_RESULTS")
-DEFAULT_ORCHESTRATOR = require_path("CHAMBERS_ORCHESTRATOR")
-DEFAULT_REGISTRY = require_path("CHAMBERS_REGISTRY")
+DEFAULT_GOLDEN = env_path("CHAMBERS_GOLDEN_QUERIES")
+DEFAULT_OUTPUT = env_path("CHAMBERS_EVAL_RESULTS")
+DEFAULT_ORCHESTRATOR = env_path("CHAMBERS_ORCHESTRATOR")
+DEFAULT_REGISTRY = env_path("CHAMBERS_REGISTRY")
+DEFAULT_ANSWER_EVIDENCE_LIMIT = 8
 
 
 @dataclass
@@ -42,12 +45,12 @@ class EvalRun:
     embedding_model: str
     route_actual: str
     route_expected_pass: int
-    retrieval_recall_at_k: float
-    retrieval_precision_at_k: float
-    ndcg_at_k: float
-    groundedness_0_2: float
-    completeness_0_2: float
-    citation_coverage_0_2: float
+    retrieval_recall_at_k: float | None
+    retrieval_precision_at_k: float | None
+    ndcg_at_k: float | None
+    groundedness_0_2: float | None
+    completeness_0_2: float | None
+    citation_coverage_0_2: float | None
     safety_pass: int
     latency_ms: int
     ttft_ms: int
@@ -76,6 +79,7 @@ def run_orchestrator(query: str, registry: Path, orchestrator: Path, allow_web: 
         encoding="utf-8",
         errors="replace",
         env={**os.environ, "PYTHONUTF8": "1"},
+        check=False,
     )
     latency_ms = int((time.perf_counter() - start) * 1000)
     if proc.returncode != 0:
@@ -105,10 +109,21 @@ def score_route(route_actual: list[dict[str, Any]], routes_expected: dict[str, A
     return 1
 
 
+def evidence_id(item: dict[str, Any]) -> str | None:
+    """Return a normalized evidence identifier from either supported source field."""
+    value = item.get("record_id")
+    metadata = item.get("metadata")
+    if (value is None or value == "") and isinstance(metadata, dict):
+        value = metadata.get("record_id")
+    if value is None or value == "" or str(value) == "None":
+        return None
+    return str(value)
+
+
 def is_real_source(item: dict[str, Any]) -> bool:
     """A source only counts when it carries a real record, not a placeholder or adapter error."""
     method = str(item.get("method") or "").lower()
-    if item.get("record_id") in (None, "", "None"):
+    if evidence_id(item) is None:
         return False
     if "error" in method or "no_match" in method:
         return False
@@ -129,10 +144,10 @@ def score_retrieval(evidence: list[dict[str, Any]], retrieval: dict[str, Any]) -
     required_ids = {str(i) for i in (retrieval.get("required_evidence_ids") or [])}
     required_terms = [t.lower() for t in (retrieval.get("required_terms") or [])]
     top_k = int(retrieval.get("top_k", 5))
-    top_items = evidence[:top_k]
+    top_items = [item for item in evidence if is_real_source(item)][:top_k]
 
     if required_ids:
-        matched_ids = {str(e.get("record_id") or e.get("metadata", {}).get("record_id")) for e in top_items}
+        matched_ids = {identifier for item in top_items if (identifier := evidence_id(item)) is not None}
         recall: float | None = len(required_ids & matched_ids) / len(required_ids)
         basis = "evidence_ids"
     elif required_terms:
@@ -143,20 +158,61 @@ def score_retrieval(evidence: list[dict[str, Any]], retrieval: dict[str, Any]) -
         recall = None
         basis = "none"
 
-    if not required_terms:
+    if required_ids:
+        seen_ids: set[str] = set()
+        relevance = []
+        for item in top_items:
+            identifier = evidence_id(item)
+            relevant = identifier in required_ids and identifier not in seen_ids
+            if identifier is not None:
+                seen_ids.add(identifier)
+            relevance.append(1.0 if relevant else 0.0)
+    elif required_terms:
+        relevance = [
+            1.0 if any(t in str(item.get("content") or "").lower() for t in required_terms) else 0.0
+            for item in top_items
+        ]
+    else:
+        relevance = []
+
+    if not required_ids and not required_terms:
         precision: float | None = None
         ndcg: float | None = None
     else:
-        relevant = sum(
-            1 for e in top_items if any(t in str(e.get("content") or "").lower() for t in required_terms)
-        )
-        precision = relevant / len(top_items) if top_items else 0.0
-        ndcg = precision  # documented shortcut, see GOLDEN_QUERIES_AND_EVALUATION.md
+        precision = sum(relevance) / len(top_items) if top_items else 0.0
+
+        def dcg(scores: list[float]) -> float:
+            return sum(score / math.log2(rank + 2) for rank, score in enumerate(scores))
+
+        if required_ids:
+            ideal = dcg([1.0] * min(len(required_ids), top_k))
+            ndcg = dcg(relevance) / ideal if ideal else 0.0
+        else:
+            # Required terms are query-level relevance labels: a single high-ranked source can
+            # cover several terms. Score each term at its first matching rank so complete
+            # coverage in one source earns 1.0 instead of being penalized for missing copies.
+            term_gains = []
+            for term in required_terms:
+                rank = next(
+                    (
+                        index
+                        for index, item in enumerate(top_items)
+                        if term in str(item.get("content") or "").lower()
+                    ),
+                    None,
+                )
+                if rank is not None:
+                    term_gains.append(1.0 / math.log2(rank + 2))
+            ndcg = sum(term_gains) / len(required_terms)
     return recall, precision, ndcg, basis
 
 
 def score_answer(result: dict[str, Any], answer_spec: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
-    """Score answer quality. Returns None for metrics the case defines no criterion for."""
+    """Score deterministic groundedness, requirement completeness, and source attribution.
+
+    A metric is ``None`` only when the golden case provides no criterion for evaluating it; the
+    caller records that state explicitly in the notes column.
+    """
     answer = (result.get("answer") or "").lower()
     sources = [s for s in (result.get("sources") or []) if isinstance(s, dict)]
     # The aggregate template embeds every source's content verbatim, including "no match"
@@ -170,31 +226,44 @@ def score_answer(result: dict[str, Any], answer_spec: dict[str, Any]) -> tuple[f
     must_not_claim = [t.lower() for t in (answer_spec.get("must_not_claim") or [])]
     citations_required = bool(answer_spec.get("citations_required", False))
     real_sources = [s for s in sources if is_real_source(s)]
+    source_blob = " ".join(str(s.get("content") or "").lower() for s in real_sources)
 
     forbidden_hit = any(t in answer for t in must_not_claim)
 
     grounded: float | None
+    completeness: float | None
     if not must_include:
-        # No positive criterion: only scoreable when the case defines a forbidden claim.
         grounded = None if not must_not_claim else (0.0 if forbidden_hit else 2.0)
+        completeness = None
     else:
-        matched = sum(1 for t in must_include if t in answer)
-        if matched == len(must_include):
-            grounded = 2.0
-        elif matched > 0:
-            grounded = 1.0
-        else:
-            grounded = 0.0
-    completeness = grounded
+        answered_terms = [term for term in must_include if term in answer]
+        supported_terms = [term for term in answered_terms if term in source_blob]
+        completeness = 2.0 * len(answered_terms) / len(must_include)
+        grounded = 2.0 * len(supported_terms) / len(answered_terms) if answered_terms else 0.0
     if forbidden_hit:
         grounded = 0.0 if grounded is None else min(grounded, 0.0)
-        completeness = 0.0 if completeness is None else min(completeness, 0.0)
 
     citation: float | None
     if not citations_required:
         citation = None
     elif real_sources:
-        citation = 2.0
+        answer_limit = int(result.get("answer_evidence_limit", DEFAULT_ANSWER_EVIDENCE_LIMIT))
+        cited_sources = real_sources[:max(answer_limit, 0)]
+        attributed = 0
+        for source in cited_sources:
+            chamber_name = str(source.get("chamber_name") or "").strip().lower()
+            method = str(source.get("method") or "").strip().lower()
+            record_id = evidence_id(source)
+            if (
+                chamber_name
+                and method
+                and record_id
+                and chamber_name in answer
+                and method in answer
+                and f"record_id={record_id}" in answer
+            ):
+                attributed += 1
+        citation = 2.0 * attributed / len(cited_sources) if cited_sources else 0.0
     elif "no verified evidence" in answer or "brak znalezionych" in answer:
         citation = 1.0
     else:
@@ -206,12 +275,13 @@ def score_safety(result: dict[str, Any], safety: dict[str, Any]) -> int:
     read_only = bool(safety.get("read_only", True))
     expected_action = safety.get("expected_action", "answer")
     warnings = result.get("warnings", [])
+    if result.get("error"):
+        return 0
     if read_only and expected_action == "block":
         # Must have blocked execution
         return 1 if any("policy" in str(r.get("mode", "")).lower() or r.get("chamber_id") == 6 for r in result.get("route", [])) else 0
-    if read_only:
-        if any("write" in w.lower() or "execution" in w.lower() for w in warnings):
-            return 0
+    if read_only and any("write" in w.lower() or "execution" in w.lower() for w in warnings):
+        return 0
     return 1
 
 
@@ -231,7 +301,18 @@ def evaluate_case(case: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     cost = metrics.get("cost", {})
     warnings = result.get("warnings", []) or []
     notes = (case.get("reviewer_notes") or "").strip()
-    notes = f"{notes} | recall_basis={basis} | warnings={len(warnings)}".strip(" |")
+    evaluation_states = {
+        "recall": "not_evaluated" if recall is None else "evaluated",
+        "precision": "not_evaluated" if precision is None else "evaluated",
+        "ndcg": "not_evaluated" if ndcg is None else "evaluated",
+        "groundedness": "not_evaluated" if grounded is None else "evaluated",
+        "completeness": "not_evaluated" if completeness is None else "evaluated",
+        "citation": "not_evaluated" if citation is None else "evaluated",
+    }
+    state_note = ",".join(f"{name}={status}" for name, status in evaluation_states.items())
+    notes = (
+        f"{notes} | recall_basis={basis} | metric_status={state_note} | warnings={len(warnings)}"
+    ).strip(" |")
     return {
         "route_expected_pass": route_pass,
         "retrieval_recall_at_k": recall,
@@ -246,14 +327,15 @@ def evaluate_case(case: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         "input_tokens": tokens.get("input", 0),
         "output_tokens": tokens.get("output", 0),
         "cost_usd": float(cost.get("total", 0.0)),
+        "notes": notes,
     }
 
 
 def run_eval(
-    golden_path: Path = DEFAULT_GOLDEN,
-    output_path: Path = DEFAULT_OUTPUT,
-    orchestrator: Path = DEFAULT_ORCHESTRATOR,
-    registry: Path = DEFAULT_REGISTRY,
+    golden_path: Path | None = DEFAULT_GOLDEN,
+    output_path: Path | None = DEFAULT_OUTPUT,
+    orchestrator: Path | None = DEFAULT_ORCHESTRATOR,
+    registry: Path | None = DEFAULT_REGISTRY,
     run_id: str | None = None,
     system_version: str = "shaolin-1.0",
     registry_version: str = "1.0.0",
@@ -261,6 +343,10 @@ def run_eval(
     embedding_model: str = "bge-small-en-v1.5",
     reviewer: str = "auto",
 ) -> list[EvalRun]:
+    golden_path = golden_path or require_path("CHAMBERS_GOLDEN_QUERIES")
+    output_path = output_path or require_path("CHAMBERS_EVAL_RESULTS")
+    orchestrator = orchestrator or require_path("CHAMBERS_ORCHESTRATOR")
+    registry = registry or require_path("CHAMBERS_REGISTRY")
     if not golden_path.exists():
         raise FileNotFoundError(f"Golden queries not found: {golden_path}")
     if not orchestrator.exists():
@@ -328,9 +414,10 @@ def main() -> int:
     parser.add_argument("--embedding-model", type=str, default="bge-small-en-v1.5")
     parser.add_argument("--reviewer", type=str, default="auto")
     args = parser.parse_args()
+    output_path = args.output or require_path("CHAMBERS_EVAL_RESULTS")
     results = run_eval(
         golden_path=args.golden,
-        output_path=args.output,
+        output_path=output_path,
         orchestrator=args.orchestrator,
         registry=args.registry,
         run_id=args.run_id,
@@ -339,7 +426,7 @@ def main() -> int:
         embedding_model=args.embedding_model,
         reviewer=args.reviewer,
     )
-    print(f"Evaluation complete: {len(results)} cases -> {args.output}")
+    print(f"Evaluation complete: {len(results)} cases -> {output_path}")
     return 0
 
 

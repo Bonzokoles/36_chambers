@@ -1,14 +1,16 @@
 """Read-only, registry-driven orchestration for the 36 Chambers of Shaolin Cognitive Matrix.
 
-Integrates real database adapters for:
+Integrates read-only database adapters for:
 - Chamber 01 (sist2 document index / FTS5)
 - Chamber 03 (DEVz Knowledge Base / ChromaDB)
 - Chamber 04 (MemPalace / ChromaDB)
 - Chamber 05 (Graph of Truth / SQLite triples & entities)
 - Chamber 06 (The Iron Fist / Policy gate for write & execution)
-- Chamber 07 (Vector Micro-Engine / sqlite-vec + fastembed)
 - Chamber 08 (Store & Operations / SQLite chat.db)
-- Chamber 36 (The Buch / Jimbo synthesis)
+
+Chamber 07 is intentionally not implemented until a database schema, embedding model, and
+query contract are supplied. Chamber 36 currently orchestrates and aggregates evidence; it does
+not perform generative synthesis. Both limitations are declared in the registry.
 """
 from __future__ import annotations
 
@@ -17,20 +19,22 @@ import concurrent.futures
 import glob
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
 import urllib.parse
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # Host-specific paths resolve from environment via config.py (see .env.example).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config import path as env_path, require as require_path
+from config import path as env_path
+from config import require as require_path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -43,8 +47,8 @@ try:
 except ImportError:
     chromadb = None
 
-DEFAULT_REGISTRY = require_path("CHAMBERS_REGISTRY")
-DEFAULT_TRACE_DIR = require_path("CHAMBERS_TRACE_DIR")
+DEFAULT_REGISTRY = env_path("CHAMBERS_REGISTRY")
+DEFAULT_TRACE_DIR = env_path("CHAMBERS_TRACE_DIR")
 
 # Question words that match almost every indexed path and therefore destroy Chamber 01 precision.
 SIST2_STOPWORDS = {
@@ -82,6 +86,9 @@ class Chamber:
     domain: str
     engine: str
     physical_path: str
+    adapter: str | None = None
+    status: str = "implemented"
+    route_modes: tuple[str, ...] = ()
     description: str = ""
     notes: str = ""
 
@@ -114,6 +121,7 @@ class State:
     timeout_s: float = 15.0
     allow_web: bool = False
     write_intent: bool = False
+    policy_blocked: bool = False
     intent: str = "unknown"
     subqueries: list[str] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
@@ -137,18 +145,61 @@ def timed(state: State, stage: str, fn: Callable[[], Any]) -> Any:
 def load_registry(path: Path) -> dict[int, Chamber]:
     with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
-    chambers = {}
+    chambers: dict[int, Chamber] = {}
     for raw in data.get("chambers", []):
-        chambers[int(raw["id"])] = Chamber(
-            id=int(raw["id"]),
+        chamber_id = int(raw["id"])
+        if chamber_id in chambers:
+            raise ValueError(f"Duplicate chamber id {chamber_id} in registry")
+        chambers[chamber_id] = Chamber(
+            id=chamber_id,
             name=raw["name"],
-            domain=raw.get("domain", ""),
+            domain=raw.get("domain", raw.get("specialization", "")),
             engine=raw.get("engine", ""),
-            physical_path=raw.get("physical_path", ""),
-            description=raw.get("description", ""),
+            physical_path=raw.get("physical_path", raw.get("path", raw.get("endpoint", ""))),
+            adapter=raw.get("adapter"),
+            status=str(raw.get("status", "implemented")).lower(),
+            route_modes=tuple(raw.get("route_modes", ())),
+            description=raw.get("description", raw.get("specialization", "")),
             notes=raw.get("notes", ""),
         )
+    validate_registry(chambers)
     return chambers
+
+
+def validate_registry(chambers: dict[int, Chamber]) -> None:
+    """Fail fast when registry capability claims do not match executable adapters."""
+    valid_statuses = {"implemented", "not_implemented", "orchestration_only"}
+    for chamber in chambers.values():
+        if chamber.status not in valid_statuses:
+            raise ValueError(f"Chamber {chamber.id} has unsupported status {chamber.status!r}")
+        if chamber.status == "implemented":
+            if not chamber.adapter or chamber.adapter not in ADAPTERS:
+                raise ValueError(
+                    f"Implemented chamber {chamber.id} must name a registered adapter; "
+                    f"got {chamber.adapter!r}"
+                )
+            supported_modes = ADAPTER_ROUTE_MODES[chamber.adapter]
+            if not chamber.route_modes or not set(chamber.route_modes).issubset(supported_modes):
+                raise ValueError(
+                    f"Chamber {chamber.id} route_modes {chamber.route_modes!r} do not match "
+                    f"adapter {chamber.adapter!r} modes {sorted(supported_modes)!r}"
+                )
+        elif chamber.adapter is not None or chamber.route_modes:
+            raise ValueError(
+                f"Non-retrieval chamber {chamber.id} must not declare an adapter or route_modes"
+            )
+    if 36 in chambers and chambers[36].status != "orchestration_only":
+        raise ValueError("Chamber 36 must be orchestration_only until synthesis is implemented")
+    invalid_orchestrators = sorted(
+        chamber.id
+        for chamber in chambers.values()
+        if chamber.id != 36 and chamber.status == "orchestration_only"
+    )
+    if invalid_orchestrators:
+        raise ValueError(
+            "Only Chamber 36 may be orchestration_only; invalid chamber ids: "
+            f"{invalid_orchestrators}"
+        )
 
 
 def get_chamber(chambers: dict[int, Chamber], chamber_id: int) -> Chamber:
@@ -158,38 +209,131 @@ def get_chamber(chambers: dict[int, Chamber], chamber_id: int) -> Chamber:
         raise ValueError(f"Chamber {chamber_id} is not registered") from exc
 
 
-# Mutation lexicon. Deliberately fail-closed: a false positive only routes the request to the
-# Chamber 06 policy gate (no side effect), while a false negative would let a write through.
+# Mutation command verbs. They are only treated as action requests in imperative or polite-command
+# position so explanatory questions (for example, "how delete commands work") stay retrievable.
 MUTATION_TERMS = (
     "usuń", "usun", "skasuj", "delete", "drop", "truncate",
-    "zapisz", "zapamięt", "dopis", "dodaj", "wstaw", "nadpisz", "zmień", "zmien", "edytuj", "update", "insert",
-    "uruchom", "wykonaj", "odpal", "terminal", "skrypt", "powershell", "cmd ",
+    "zapisz", "zapamięt", "dopis", "dodaj", "wstaw", "nadpisz", "zmień", "zmien", "zmieni", "edytuj", "update", "insert",
+    "uruchom", "wykonaj", "odpal",
     "przenieś", "skopiuj", "wgraj", "instaluj", "archiwizuj", "wyczys", "reset",
 )
+MUTATION_STEMS = ("usun", "zapamięt", "dopis", "zmień", "zmieni", "wyczys")
+COMMAND_REQUEST_PREFIXES = (
+    "can you please ", "could you please ", "would you please ", "i want you to ",
+    "i need you to ", "can you ", "could you ", "would you ", "i need to ", "i want to ",
+    "please ", "proszę ", "prosze ", "czy możesz ", "czy mozesz ", "ok, ", "then, ",
+)
+ANSWER_EVIDENCE_LIMIT = 8
+
+# Deterministic prompt-injection patterns. These are policy requests rather than knowledge
+# questions, so they must reach Chamber 06 even when they contain no mutation verb.
+SECURITY_BLOCK_TERMS = (
+    "ignore all previous instructions", "ignore previous instructions", "ignore prior instructions",
+    "bypass security", "bypass policy", "jailbreak",
+)
+PROTECTED_PROMPT_TARGETS = (
+    "system prompt", "developer message", "developer instructions", "hidden instructions", "internal instructions",
+)
+PROTECTED_PROMPT_VALUE_REFERENCES = (
+    "the system prompt", "your system prompt", "my system prompt", "the developer message",
+    "your developer message", "my developer message", "system prompt content", "system prompt text",
+    "system prompt verbatim", "developer message content", "developer message text",
+)
+CREDENTIAL_TARGETS = (
+    "database password", "master password", "password", "api key", "access token", "auth token",
+    "private key", "credentials", "the secret", "secret value",
+)
+CREDENTIAL_VALUE_REFERENCES = tuple(
+    f"{owner} {target}"
+    for owner in ("the", "my", "your", "our")
+    for target in CREDENTIAL_TARGETS
+) + (
+    "api key value", "password value", "token value", "stored api key", "stored password",
+    "stored token", "actual api key", "actual password", "actual token",
+)
+DIRECT_DISCLOSURE_TERMS = ("reveal", "print", "output", "disclose", "display", "give me")
+GENERIC_DISCLOSURE_TERMS = ("show", "tell me", "what is")
+
+
+def has_mutation_intent(query: str) -> bool:
+    """Fail closed for imperative writes while allowing informational mentions of command verbs."""
+    command_terms = MUTATION_TERMS + (
+        "execute", "run", "move", "copy", "remove", "restore", "overwrite", "install",
+    )
+    for clause in re.split(r"[.!?;\n]+", query):
+        request = clause.strip()
+        while True:
+            prefix = next((p for p in COMMAND_REQUEST_PREFIXES if request.startswith(p)), None)
+            if prefix is None:
+                break
+            request = request[len(prefix):].lstrip()
+        for term in command_terms:
+            if not request.startswith(term):
+                continue
+            if term in MUTATION_STEMS or (
+                len(request) == len(term) or not request[len(term)].isalpha()
+            ):
+                return True
+    return False
+
+
+def has_security_block_intent(query: str) -> bool:
+    """Detect explicit policy bypass or requests to exfiltrate sensitive prompt material."""
+    if any(term in query for term in SECURITY_BLOCK_TERMS):
+        return True
+
+    # Direct disclosure verbs plus a protected target are unambiguously exfiltration. Generic
+    # "show"/"tell me" wording must also identify the live prompt value, so design questions
+    # such as "show system prompt examples" remain technical-knowledge queries.
+    if any(term in query for term in DIRECT_DISCLOSURE_TERMS) and any(
+        target in query for target in PROTECTED_PROMPT_TARGETS
+    ):
+        return True
+    if any(term in query for term in GENERIC_DISCLOSURE_TERMS) and any(
+        target in query for target in PROTECTED_PROMPT_VALUE_REFERENCES
+    ):
+        return True
+
+    if any(term in query for term in DIRECT_DISCLOSURE_TERMS) and any(
+        target in query for target in CREDENTIAL_TARGETS
+    ):
+        return True
+    return any(term in query for term in GENERIC_DISCLOSURE_TERMS) and any(
+        target in query for target in CREDENTIAL_VALUE_REFERENCES
+    )
 
 
 def decompose_query(state: State) -> State:
     q = state.query.lower()
-    if any(term in q for term in MUTATION_TERMS):
+    if has_security_block_intent(q):
+        state.intent = "prompt_injection_attack"
+        state.subqueries = [state.query]
+        state.policy_blocked = True
+    elif has_mutation_intent(q):
         state.intent = "execution"
         state.subqueries = [state.query]
         state.write_intent = True
+        state.policy_blocked = True
     elif any(term in q for term in (
         "cena", "ceny", "cene", "cenie", "cenow", "marż", "marz", "faktur", "produkt",
         "dostawc", "sklep", "zamów", "zamow", "konwersacj", "sprzeda", "magazyn", "zapas", "inwentarz",
+        "price", "product", "supplier", "store", "inventory", "stock", "conversation",
     )):
         state.intent, state.subqueries = "commerce", [state.query]
     elif any(term in q for term in (
         "relacj", "graf", "węzeł", "węzł", "wezl", "entity", "entities", "kto z kim",
         "trójk", "trojc", "triple", "połączon", "polaczon", "powiązan", "powiazan", "wspiera",
+        "relation", "connected",
     )):
         state.intent, state.subqueries = "graph", [state.query]
     elif any(term in q for term in (
         "pamię", "pamie", "preferencj", "histori", "mempalace", "drawer", "closet", "pomiar",
+        "memory", "preference", "history", "recall",
     )):
         state.intent, state.subqueries = "memory", [state.query]
     elif any(term in q for term in (
         "plik", "folder", "katalog", "dysk", "znajdź dokument", "muninn", "sist2",
+        " file", "directory", " disk",
     )):
         state.intent, state.subqueries = "file_discovery", [state.query]
     else:
@@ -199,8 +343,8 @@ def decompose_query(state: State) -> State:
 
 def route_query(state: State, chambers: dict[int, Chamber]) -> State:
     candidates: list[Route]
-    if state.write_intent:
-        candidates = [Route(6, "policy_gate", "Execution or state-changing intent detected")]
+    if state.policy_blocked:
+        candidates = [Route(6, "policy_gate", "Security policy-sensitive intent detected")]
     elif state.intent == "commerce":
         candidates = [Route(8, "sql", "Business-data intent"), Route(1, "fts", "Lexical fallback")]
     elif state.intent == "graph":
@@ -216,9 +360,21 @@ def route_query(state: State, chambers: dict[int, Chamber]) -> State:
             Route(5, "graph_sql", "Entity relation corroboration"),
         ]
 
-    if state.allow_web and 2 in chambers:
-        candidates.append(Route(2, "http", "Web retrieval explicitly allowed"))
-    state.routes = [r for r in candidates if r.chamber_id in chambers][: state.max_chambers]
+    if state.allow_web:
+        if state.policy_blocked:
+            state.warnings.append("Web retrieval was suppressed by the security policy gate.")
+        elif 2 in chambers and chambers[2].status == "implemented":
+            candidates.append(Route(2, "http", "Web retrieval explicitly allowed"))
+        else:
+            state.warnings.append("Web retrieval requested, but Chamber 02 is not implemented.")
+
+    state.routes = [
+        route
+        for route in candidates
+        if route.chamber_id in chambers
+        and chambers[route.chamber_id].status == "implemented"
+        and route.mode in chambers[route.chamber_id].route_modes
+    ][: state.max_chambers]
     return state
 
 
@@ -358,9 +514,15 @@ def adapter_chamber_01_sist2(chamber: Chamber, query: str, limit: int = 5) -> li
                     if len(evidence_list) >= limit:
                         break
                     param = f"%{term}%"
+                    # The appended clause is a module constant; all user values stay bound.
+                    lookup_sql = (
+                        "SELECT id, path, size, json_data FROM document "  # nosec B608
+                        "WHERE (path LIKE ? OR json_data LIKE ?) "
+                        + SIST2_EXCLUDE_SQL
+                        + " LIMIT ?"
+                    )
                     rows = cursor.execute(
-                        "SELECT id, path, size, json_data FROM document "
-                        "WHERE (path LIKE ? OR json_data LIKE ?) " + SIST2_EXCLUDE_SQL + " LIMIT ?",
+                        lookup_sql,
                         (param, param, limit - len(evidence_list)),
                     ).fetchall()
                     for doc_id, doc_path, doc_size, json_data in rows:
@@ -657,42 +819,13 @@ def adapter_chamber_06_policy_gate(chamber: Chamber, query: str, limit: int = 5)
             resource_path=chamber.physical_path,
             method="policy_gate",
             record_id="POLICY_BLOCK_MUTATION",
-            content="Execution/write request detected. Operation blocked by Shaolin Iron Fist policy gate. Human approval and explicit allowlisted plan required.",
+            content=(
+                "SECURITY BLOCKED: policy-sensitive prompt, execution, or write intent detected. "
+                "No operation was performed; human approval and an explicit allowlisted plan are required."
+            ),
             metadata={"query": query, "policy": "read_only_default", "status": "BLOCKED"},
         )
     ]
-
-
-def adapter_chamber_07_semantic_sqlite(chamber: Chamber, query: str, limit: int = 5) -> list[Evidence]:
-    """Chamber 07: Vector Micro-Engine (sqlite-vec + fastembed)."""
-    try:
-        from semantic_sqlite import search_semantic
-        results = search_semantic(query, top_k=limit)
-        return [
-            Evidence(
-                chamber_id=chamber.id,
-                chamber_name=chamber.name,
-                resource_path=chamber.physical_path,
-                method="sqlite_vec_fastembed",
-                record_id=str(r.get("id")),
-                content=f"Semantic record: {r.get('content')} (score={r.get('score'):.4f})",
-                metadata=r,
-                score=r.get("score"),
-            )
-            for r in results
-        ]
-    except Exception as exc:
-        return [
-            Evidence(
-                chamber_id=chamber.id,
-                chamber_name=chamber.name,
-                resource_path=chamber.physical_path,
-                method="sqlite_vec_error",
-                record_id=None,
-                content=f"Micro-vector query fallback: {exc}",
-                metadata={"error": str(exc)},
-            )
-        ]
 
 
 def adapter_chamber_08_commerce_ops(chamber: Chamber, query: str, limit: int = 5) -> list[Evidence]:
@@ -729,8 +862,6 @@ def adapter_chamber_08_commerce_ops(chamber: Chamber, query: str, limit: int = 5
             conv_cols = columns("conversations")
             selectable = [c for c in ("id", "title", "created_at") if c in conv_cols]
             if not selectable:
-                selectable = conv_cols[:1]
-            if not selectable:
                 return [
                     Evidence(
                         chamber_id=chamber.id,
@@ -745,9 +876,11 @@ def adapter_chamber_08_commerce_ops(chamber: Chamber, query: str, limit: int = 5
 
             order_by = ' ORDER BY "id" DESC' if "id" in conv_cols else ""
             sel = ", ".join('"' + c + '"' for c in selectable)
-            rows = cursor.execute(
-                f"SELECT {sel} FROM conversations{order_by} LIMIT ?", (limit,)
-            ).fetchall()
+            # Identifiers come only from the fixed allowlist above, never from the query.
+            conversation_sql = (
+                f"SELECT {sel} FROM conversations{order_by} LIMIT ?"  # nosec B608
+            )
+            rows = cursor.execute(conversation_sql, (limit,)).fetchall()
 
             msg_counts: dict[Any, int] = {}
             if "messages" in tables and "conversation_id" in columns("messages"):
@@ -793,32 +926,30 @@ def adapter_chamber_08_commerce_ops(chamber: Chamber, query: str, limit: int = 5
 # ORCHESTRATION PIPELINE
 # ---------------------------------------------------------------------------
 
+ADAPTERS: dict[str, Callable[[Chamber, str, int], list[Evidence]]] = {
+    "sist2": adapter_chamber_01_sist2,
+    "chroma_devz": adapter_chamber_03_devz_kb,
+    "chroma_mempalace": adapter_chamber_04_mempalace,
+    "graph_sqlite": adapter_chamber_05_graph,
+    "policy_gate": adapter_chamber_06_policy_gate,
+    "commerce_sqlite": adapter_chamber_08_commerce_ops,
+}
+
+ADAPTER_ROUTE_MODES: dict[str, set[str]] = {
+    "sist2": {"fts"},
+    "chroma_devz": {"semantic"},
+    "chroma_mempalace": {"semantic"},
+    "graph_sqlite": {"graph_sql"},
+    "policy_gate": {"policy_gate"},
+    "commerce_sqlite": {"sql"},
+}
+
 def retrieve_one(route: Route, chamber: Chamber, query: str) -> list[Evidence]:
-    cid = route.chamber_id
-    if route.mode == "policy_gate" or cid == 6:
-        return adapter_chamber_06_policy_gate(chamber, query)
-    if cid == 1:
-        return adapter_chamber_01_sist2(chamber, query)
-    if cid == 3:
-        return adapter_chamber_03_devz_kb(chamber, query)
-    if cid == 4:
-        return adapter_chamber_04_mempalace(chamber, query)
-    if cid == 5:
-        return adapter_chamber_05_graph(chamber, query)
-    if cid == 7:
-        return adapter_chamber_07_semantic_sqlite(chamber, query)
-    if cid == 8:
-        return adapter_chamber_08_commerce_ops(chamber, query)
-
-    # Generic fallback
-    if route.mode == "semantic":
-        return adapter_chamber_03_devz_kb(chamber, query)
-    if route.mode in {"sql", "graph_sql"}:
-        return adapter_chamber_05_graph(chamber, query)
-    if route.mode == "fts":
-        return adapter_chamber_01_sist2(chamber, query)
-
-    raise ValueError(f"Unsupported route mode {route.mode} for chamber {cid}")
+    if chamber.status != "implemented" or not chamber.adapter:
+        raise ValueError(f"Chamber {chamber.id} is not an implemented retrieval chamber")
+    if route.mode not in chamber.route_modes:
+        raise ValueError(f"Route mode {route.mode!r} is not declared for chamber {chamber.id}")
+    return ADAPTERS[chamber.adapter](chamber, query, 5)
 
 
 def retrieve(state: State, chambers: dict[int, Chamber]) -> State:
@@ -829,17 +960,26 @@ def retrieve(state: State, chambers: dict[int, Chamber]) -> State:
     def task(route: Route) -> tuple[Route, list[Evidence], str | None, int]:
         start = now_ms()
         try:
-            result = retrieve_one(route, get_chamber(chambers, route.chamber_id), state.query)
+            chamber = get_chamber(chambers, route.chamber_id)
+            result = retrieve_one(route, chamber, state.query)
             return route, result, None, now_ms() - start
         except Exception as exc:
-            return route, [], f"Chamber {route.chamber_id} failed: {type(exc).__name__}: {exc}", now_ms() - start
+            message = f"Chamber {route.chamber_id} failed: {type(exc).__name__}: {exc}"
+            return route, [], message, now_ms() - start
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(state.routes))) as pool:
         futures = [pool.submit(task, route) for route in state.routes]
         for future in futures:
             try:
                 route, result, error, latency = future.result(timeout=state.timeout_s)
-                state.metrics["retrieval"][str(route.chamber_id)] = {"latency_ms": latency, "mode": route.mode}
+                route_metric = {
+                    "latency_ms": latency,
+                    "mode": route.mode,
+                    "status": "failed" if error else "success",
+                }
+                if error:
+                    route_metric["error"] = error
+                state.metrics["retrieval"][str(route.chamber_id)] = route_metric
                 state.evidence.extend(result)
                 if error:
                     state.warnings.append(error)
@@ -861,12 +1001,15 @@ def verify_evidence(state: State) -> State:
 
 def aggregate(state: State) -> dict[str, Any]:
     lines = [f"Intent: {state.intent}."]
-    if state.write_intent:
-        lines.append("[POLICY GATE ACTIVE] Execution or write intent detected. No automated commands executed; explicit approval required.")
+    if state.policy_blocked:
+        lines.append("[POLICY GATE ACTIVE] Security-sensitive intent detected. No automated action was taken.")
     if state.evidence:
         chambers_str = ", ".join(sorted({f"Chamber {e.chamber_id:02d}" for e in state.evidence}))
         lines.append(f"Retrieved {len(state.evidence)} evidence item(s) across: {chambers_str}.")
-        lines.extend(f"- [{e.chamber_name} | {e.method}] {e.content}" for e in state.evidence[:8])
+        lines.extend(
+            f"- [{e.chamber_name} | {e.method} | record_id={e.record_id if e.record_id is not None else 'unverified'}] {e.content}"
+            for e in state.evidence[:ANSWER_EVIDENCE_LIMIT]
+        )
     else:
         lines.append("No verified evidence is available for a grounded answer.")
     if state.warnings:
@@ -874,6 +1017,13 @@ def aggregate(state: State) -> dict[str, Any]:
     return {
         "request_id": state.request_id,
         "answer": "\n".join(lines),
+        "answer_mode": "evidence_aggregation",
+        "answer_evidence_limit": ANSWER_EVIDENCE_LIMIT,
+        "synthesis": {
+            "chamber_id": 36,
+            "status": "not_implemented",
+            "detail": "The deterministic answer is an evidence pack; no LLM synthesis was performed.",
+        },
         "intent": state.intent,
         "route": [asdict(r) for r in state.routes],
         "sources": [asdict(e) for e in state.evidence],
@@ -897,7 +1047,8 @@ def log_observatory_events(state: State, result: dict[str, Any]) -> None:
         now_str = datetime.now(timezone.utc).isoformat()
         with events_file.open("a", encoding="utf-8") as f:
             for route in state.routes:
-                lat = state.metrics.get("retrieval", {}).get(str(route.chamber_id), {}).get("latency_ms", 0)
+                route_metric = state.metrics.get("retrieval", {}).get(str(route.chamber_id), {})
+                lat = route_metric.get("latency_ms", 0)
                 f.write(json.dumps({
                     "event_type": "agent_event",
                     "event_time": now_str,
@@ -907,12 +1058,16 @@ def log_observatory_events(state: State, result: dict[str, Any]) -> None:
                     "chamber_id": route.chamber_id,
                     "resource_id": f"chamber_{route.chamber_id:02d}",
                     "action": f"{route.mode}_retrieval",
-                    "status": "success",
+                    "status": route_metric.get("status", "failed"),
+                    "error": route_metric.get("error"),
                     "latency_ms": lat,
                     "model": "local-deterministic",
                     "task_type": state.intent
                 }) + "\n")
             for rank, ev in enumerate(state.evidence, 1):
+                method = ev.method.lower()
+                if "error" in method or "no_match" in method or ev.record_id is None:
+                    continue
                 f.write(json.dumps({
                     "event_type": "retrieval_event",
                     "event_time": now_str,
@@ -920,7 +1075,11 @@ def log_observatory_events(state: State, result: dict[str, Any]) -> None:
                     "agent_name": "shaolin_orchestrator",
                     "chamber_id": ev.chamber_id,
                     "resource_id": f"chamber_{ev.chamber_id:02d}",
-                    "document_id": ev.record_id or ev.metadata.get("path") or "doc_unknown",
+                    "document_id": (
+                        ev.record_id
+                        if ev.record_id is not None
+                        else ev.metadata.get("path") or "doc_unknown"
+                    ),
                     "chunk_id": f"{ev.record_id}_chunk",
                     "retrieval_method": ev.method,
                     "rank": rank,
@@ -936,7 +1095,14 @@ def log_observatory_events(state: State, result: dict[str, Any]) -> None:
         pass
 
 
-def run(query: str, registry_path: Path = DEFAULT_REGISTRY, allow_web: bool = False, trace_dir: Path = DEFAULT_TRACE_DIR) -> dict[str, Any]:
+def run(
+    query: str,
+    registry_path: Path | None = DEFAULT_REGISTRY,
+    allow_web: bool = False,
+    trace_dir: Path | None = DEFAULT_TRACE_DIR,
+) -> dict[str, Any]:
+    registry_path = registry_path or require_path("CHAMBERS_REGISTRY")
+    trace_dir = trace_dir or require_path("CHAMBERS_TRACE_DIR")
     chambers = load_registry(registry_path)
     state = State(request_id=str(uuid.uuid4()), query=query, allow_web=allow_web)
     total_start = now_ms()
@@ -960,10 +1126,16 @@ def main() -> int:
     parser.add_argument("--allow-web", action="store_true")
     parser.add_argument("--trace-dir", type=Path, default=DEFAULT_TRACE_DIR)
     args = parser.parse_args()
-    if not args.registry.exists():
-        print(f"Registry not found: {args.registry}", file=sys.stderr)
+    try:
+        registry_path = args.registry or require_path("CHAMBERS_REGISTRY")
+        trace_dir = args.trace_dir or require_path("CHAMBERS_TRACE_DIR")
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         return 2
-    res = run(args.query, args.registry, args.allow_web, args.trace_dir)
+    if not registry_path.exists():
+        print(f"Registry not found: {registry_path}", file=sys.stderr)
+        return 2
+    res = run(args.query, registry_path, args.allow_web, trace_dir)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 
