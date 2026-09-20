@@ -213,7 +213,7 @@ def get_chamber(chambers: dict[int, Chamber], chamber_id: int) -> Chamber:
 # position so explanatory questions (for example, "how delete commands work") stay retrievable.
 MUTATION_TERMS = (
     "usuń", "usun", "skasuj", "delete", "drop", "truncate",
-    "zapisz", "zapamięt", "dopis", "dodaj", "wstaw", "nadpisz", "zmień", "zmien", "zmieni", "edytuj", "update", "insert",
+    "zapisz", "zapamięt", "dopis", "dodaj", "wstaw", "nadpisz", "zmień", "zmien", "zmieni", "edytuj", "update", "insert", "zaktualizuj", "aktualizuj",
     "uruchom", "wykonaj", "odpal",
     "przenieś", "skopiuj", "wgraj", "instaluj", "archiwizuj", "wyczys", "reset",
 )
