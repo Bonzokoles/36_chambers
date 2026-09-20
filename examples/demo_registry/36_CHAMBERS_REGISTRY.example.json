@@ -1,0 +1,85 @@
+{
+  "system": "36_CHAMBERS_SHAOLIN_COGNITIVE_MATRIX",
+  "version": "1.0.0-example",
+  "updated_at": "2026-09-20T00:00:00Z",
+  "master_orchestrator": {
+    "chamber_id": 36,
+    "name": "The 36th Chamber (The Buch Master Engine)",
+    "role": "Federation, Synthesis, Evaluation & Telemetry",
+    "engine": "FastAPI / Python Hybrid Orchestrator",
+    "status": "ACTIVE"
+  },
+  "chambers": [
+    {
+      "id": 1,
+      "name": "Eye of Shaolin",
+      "specialization": "Fast filesystem text index & forensic search",
+      "engine": "SQLite FTS5 / sist2",
+      "path": "./examples/demo_data/sist2_demo.db",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 2,
+      "name": "Web Crawler & Edge",
+      "specialization": "External HTTP search and scraping",
+      "engine": "HTTP Client",
+      "endpoint": "http://localhost:8888",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 3,
+      "name": "Grand Knowledge",
+      "specialization": "Semantic embeddings for technical repository knowledge",
+      "engine": "ChromaDB",
+      "path": "./examples/demo_data/chroma_kb",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 4,
+      "name": "Memory Palace",
+      "specialization": "Long-term episodic and semantic memory",
+      "engine": "ChromaDB / MemPalace",
+      "path": "./examples/demo_data/mempalace",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 5,
+      "name": "Graph of Truth",
+      "specialization": "Knowledge graph entities and relational facts",
+      "engine": "SQLite Triples",
+      "path": "./examples/demo_data/knowledge_graph.sqlite3",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 6,
+      "name": "The Iron Fist",
+      "specialization": "Security policy gate, mutation blocking & four-room quarantine",
+      "engine": "Policy Engine / ACL Gate",
+      "path": "./runtime/security",
+      "access_mode": "security_enforcer"
+    },
+    {
+      "id": 7,
+      "name": "Vector Micro-Engine",
+      "specialization": "In-process vector similarity",
+      "engine": "sqlite-vec / fastembed",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 8,
+      "name": "Store & Operations",
+      "specialization": "Operational chat and transactional records",
+      "engine": "SQLite",
+      "path": "./examples/demo_data/chat_demo.db",
+      "access_mode": "read_only"
+    },
+    {
+      "id": 36,
+      "name": "The 36th Chamber",
+      "specialization": "Supreme cognitive synthesis and command orchestration",
+      "engine": "The Buch Master Engine",
+      "path": "./src/orchestrator",
+      "access_mode": "master"
+    }
+  ]
+}

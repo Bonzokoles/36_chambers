@@ -1,0 +1,14 @@
+{
+  "version": "0.1",
+  "minimum_hold_hours": 36,
+  "rooms": {
+    "00_Invitation_Quarantine": {"next": "01_Rookie_Validation", "risk_actions": {"critical": "reject", "high": "manual_review", "medium": "manual_review", "low": "allow_to_rookie"}},
+    "01_Rookie_Validation": {"next": "production_candidate", "requires": ["hash_verified", "technical_scan_passed", "model_review_passed", "provenance_complete"]},
+    "98_Retirement_Quarantine": {"next": "99_Deletion_Hold", "requires": ["backup_verified", "dependency_check_passed", "owner_review"]},
+    "99_Deletion_Hold": {"next": "archive_or_delete", "requires": ["restore_test_passed", "final_human_approval"]}
+  },
+  "allowed_extensions": [".txt", ".md", ".pdf", ".docx", ".csv", ".json", ".sqlite", ".sqlite3", ".db"],
+  "blocked_extensions": [".exe", ".dll", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".scr", ".com", ".jar"],
+  "protected_retention_classes": ["PROTECTED", "DO_NOT_DELETE"],
+  "max_file_size_mb": 250
+}

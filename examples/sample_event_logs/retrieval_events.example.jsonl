@@ -1,0 +1,2 @@
+{"event_id":"demo-evt-001","timestamp":"2026-09-20T00:00:01Z","agent_name":"ShaolinOrchestrator","session_id":"sess-demo-1","chamber_id":3,"action":"semantic_query","duration_ms":124.5,"success":true,"error_code":null}
+{"event_id":"demo-ret-001","timestamp":"2026-09-20T00:00:01Z","query_hash":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","asset_uri":"examples/demo_data/chroma_kb/doc1.md","chamber_id":3,"relevance_score":0.94,"latency_ms":124.5,"tokens_retrieved":350}

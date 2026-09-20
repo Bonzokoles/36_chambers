@@ -1,0 +1,55 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+credentials.json
+token.json
+secrets/
+private/
+
+# Production databases, indexes and artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.sist2
+*.wal
+*.shm
+*.hnsw
+*.bin
+chroma_db*/
+mempalace/
+/observatory/
+runtime/
+backups/
+archive/
+
+# Telemetry and audit data
+logs/
+traces/
+audit_logs/
+*.jsonl
+!examples/**/*.jsonl
+*.csv
+!examples/**/*.csv
+
+# Python/runtime
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+dist/
+build/
+*.egg-info/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

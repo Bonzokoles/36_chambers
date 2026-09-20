@@ -1,0 +1,7 @@
+pytest
+ruff
+mypy
+bandit
+pip-audit
+detect-secrets
+pre-commit
