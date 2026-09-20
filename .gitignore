@@ -1,4 +1,17 @@
-# Secrets and local environment
+# ================================================================
+# 36 Chambers — .gitignore
+# Chroni prywatne katalogi robocze przed wyciekiem do publicznego repo.
+# ================================================================
+
+# === PRIVATE WORKSPACE (nigdy nie pushować) ===
+.doc/
+.omx/
+.security/
+05_PrivateHelpChat/
+The_Buch/
+WORKSPACE_META_TEMPLATE/
+
+# === Secrets and local environment ===
 .env
 .env.*
 !.env.example
@@ -11,7 +24,7 @@ token.json
 secrets/
 private/
 
-# Production databases, indexes and artifacts
+# === Production databases, indexes and artifacts ===
 *.db
 *.sqlite
 *.sqlite3
@@ -27,7 +40,7 @@ runtime/
 backups/
 archive/
 
-# Telemetry and audit data
+# === Telemetry and audit data ===
 logs/
 traces/
 audit_logs/
@@ -36,7 +49,7 @@ audit_logs/
 *.csv
 !examples/**/*.csv
 
-# Python/runtime
+# === Python/runtime ===
 .venv/
 venv/
 __pycache__/
@@ -48,7 +61,7 @@ dist/
 build/
 *.egg-info/
 
-# OS/editor
+# === OS/editor ===
 .DS_Store
 Thumbs.db
 .vscode/
