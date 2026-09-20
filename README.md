@@ -4,6 +4,10 @@
 [![Security: Four-Room Quarantine](https://img.shields.io/badge/Security-Four--Room%20Pipeline-emerald.svg)](docs/security/FOUR_ROOM_PIPELINE.md)
 [![Architecture: Registry-First](https://img.shields.io/badge/Architecture-Federated%20Matrix-cyan.svg)](RADM.md)
 
+<p align="center">
+  <img src="assets/36_chambers_shaolin_matrix_hero.jpg" alt="36 Chambers of Shaolin Cognitive Matrix" width="100%" />
+</p>
+
 An advanced, federated cognitive architecture for autonomous AI agents, inspired by the 36 Chambers of Shaolin. In the classic tradition, 35 specialized training chambers hone distinct faculties—balance, visual acuity, memory, and defensive discipline—culminating in the legendary **36th Chamber (The Master Engine)**, which orchestrates, synthesizes, and governs total operational mastery.
 
 Data assets remain in their native specialized storage layers (SQLite FTS5, ChromaDB, Triples, and operational stores) while agents discover and query through a unified, immutable registry with strict read-only enforcement and rigorous security gates.
@@ -11,6 +15,10 @@ Data assets remain in their native specialized storage layers (SQLite FTS5, Chro
 ---
 
 ## Architecture Overview
+
+<p align="center">
+  <img src="assets/shaolin_matrix_hud_dashboard.jpg" alt="36 Chambers Shaolin Cognitive Matrix HUD Dashboard" width="100%" />
+</p>
 
 ```text
                                 [ User / CLI / API ]
