@@ -4,10 +4,15 @@ Expected event_type: agent_event or retrieval_event. Unknown event types are ski
 from __future__ import annotations
 import argparse,json,sqlite3,uuid
 from pathlib import Path
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config import path as env_path
+
 from knowledge_inventory_scan import connect
 
 def main():
- ap=argparse.ArgumentParser(); ap.add_argument("--log",type=Path,required=True); ap.add_argument("--db",type=Path,default=Path(r"Z:\36_chambers\.doc\observatory\knowledge_observatory.sqlite")); args=ap.parse_args(); con=connect(args.db); ok=skip=0
+ ap=argparse.ArgumentParser(); ap.add_argument("--log",type=Path,required=True); ap.add_argument("--db",type=Path,default=env_path("CHAMBERS_OBSERVATORY_SQLITE")); args=ap.parse_args(); con=connect(args.db); ok=skip=0
  with args.log.open(encoding="utf-8") as f:
   for line in f:
    if not line.strip(): continue

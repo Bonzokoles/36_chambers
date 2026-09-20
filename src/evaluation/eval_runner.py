@@ -14,6 +14,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+# Host-specific paths resolve from environment via config.py (see .env.example).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config import path as env_path, require as require_path
+
 import yaml
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -21,10 +25,10 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-DEFAULT_GOLDEN = Path(r"Z:\36_chambers\.doc\golden_queries.yaml")
-DEFAULT_OUTPUT = Path(r"Z:\36_chambers\.doc\eval_results.csv")
-DEFAULT_ORCHESTRATOR = Path(r"Z:\36_chambers\The_Buch\The_brain\agents\shaolin_orchestrator.py")
-DEFAULT_REGISTRY = Path(r"Z:\36_chambers\.doc\36_CHAMBERS_REGISTRY.json")
+DEFAULT_GOLDEN = require_path("CHAMBERS_GOLDEN_QUERIES")
+DEFAULT_OUTPUT = require_path("CHAMBERS_EVAL_RESULTS")
+DEFAULT_ORCHESTRATOR = require_path("CHAMBERS_ORCHESTRATOR")
+DEFAULT_REGISTRY = require_path("CHAMBERS_REGISTRY")
 
 
 @dataclass
@@ -101,58 +105,101 @@ def score_route(route_actual: list[dict[str, Any]], routes_expected: dict[str, A
     return 1
 
 
-def score_retrieval(evidence: list[dict[str, Any]], retrieval: dict[str, Any]) -> tuple[float, float, float]:
-    required_ids = set(retrieval.get("required_evidence_ids", []))
-    required_terms = [t.lower() for t in retrieval.get("required_terms", [])]
+def is_real_source(item: dict[str, Any]) -> bool:
+    """A source only counts when it carries a real record, not a placeholder or adapter error."""
+    method = str(item.get("method") or "").lower()
+    if item.get("record_id") in (None, "", "None"):
+        return False
+    if "error" in method or "no_match" in method:
+        return False
+    content = str(item.get("content") or "")
+    for marker in ("No documents matched", "No matching memories", "No graph relations found", "No evidence"):
+        if content.startswith(marker):
+            return False
+    return True
+
+
+def score_retrieval(evidence: list[dict[str, Any]], retrieval: dict[str, Any]) -> tuple[float | None, float | None, float | None, str]:
+    """Return (recall, precision, ndcg, basis).
+
+    Recall is only meaningful against a gold reference. With gold evidence ids it is computed on
+    ids; without them it falls back to the required terms; with neither it is reported as
+    undefined (None) instead of a fabricated 1.0.
+    """
+    required_ids = {str(i) for i in (retrieval.get("required_evidence_ids") or [])}
+    required_terms = [t.lower() for t in (retrieval.get("required_terms") or [])]
     top_k = int(retrieval.get("top_k", 5))
-    if not required_ids and not required_terms:
-        return 1.0, 1.0, 1.0
     top_items = evidence[:top_k]
-    matched_ids = {e.get("record_id") or e.get("metadata", {}).get("record_id") for e in top_items}
-    recall = len(required_ids.intersection(matched_ids)) / len(required_ids) if required_ids else 1.0
-    relevant = 0
-    for e in top_items:
-        content = (e.get("content") or "").lower()
-        if any(term in content for term in required_terms):
-            relevant += 1
-    precision = relevant / len(top_items) if top_items else 0.0
-    ndcg = precision
-    return recall, precision, ndcg
+
+    if required_ids:
+        matched_ids = {str(e.get("record_id") or e.get("metadata", {}).get("record_id")) for e in top_items}
+        recall: float | None = len(required_ids & matched_ids) / len(required_ids)
+        basis = "evidence_ids"
+    elif required_terms:
+        blob = " ".join(str(e.get("content") or "").lower() for e in top_items)
+        recall = sum(1 for t in required_terms if t in blob) / len(required_terms)
+        basis = "required_terms"
+    else:
+        recall = None
+        basis = "none"
+
+    if not required_terms:
+        precision: float | None = None
+        ndcg: float | None = None
+    else:
+        relevant = sum(
+            1 for e in top_items if any(t in str(e.get("content") or "").lower() for t in required_terms)
+        )
+        precision = relevant / len(top_items) if top_items else 0.0
+        ndcg = precision  # documented shortcut, see GOLDEN_QUERIES_AND_EVALUATION.md
+    return recall, precision, ndcg, basis
 
 
-def score_answer(result: dict[str, Any], answer_spec: dict[str, Any]) -> tuple[float, float, float]:
+def score_answer(result: dict[str, Any], answer_spec: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
+    """Score answer quality. Returns None for metrics the case defines no criterion for."""
     answer = (result.get("answer") or "").lower()
-    must_include = [t.lower() for t in answer_spec.get("must_include", [])]
-    must_not_claim = [t.lower() for t in answer_spec.get("must_not_claim", [])]
+    sources = [s for s in (result.get("sources") or []) if isinstance(s, dict)]
+    # The aggregate template embeds every source's content verbatim, including "no match"
+    # placeholders that quote the question. Score generated content, not the echoed query.
+    for s in sources:
+        if not is_real_source(s):
+            placeholder = str(s.get("content") or "").lower()
+            if placeholder:
+                answer = answer.replace(placeholder, "")
+    must_include = [t.lower() for t in (answer_spec.get("must_include") or [])]
+    must_not_claim = [t.lower() for t in (answer_spec.get("must_not_claim") or [])]
     citations_required = bool(answer_spec.get("citations_required", False))
-    sources = result.get("sources", [])
-    grounded = 0
+    real_sources = [s for s in sources if is_real_source(s)]
+
+    forbidden_hit = any(t in answer for t in must_not_claim)
+
+    grounded: float | None
     if not must_include:
-        grounded = 2
+        # No positive criterion: only scoreable when the case defines a forbidden claim.
+        grounded = None if not must_not_claim else (0.0 if forbidden_hit else 2.0)
     else:
         matched = sum(1 for t in must_include if t in answer)
         if matched == len(must_include):
-            grounded = 2
+            grounded = 2.0
         elif matched > 0:
-            grounded = 1
+            grounded = 1.0
         else:
-            grounded = 0
+            grounded = 0.0
     completeness = grounded
-    citation_coverage = 0
+    if forbidden_hit:
+        grounded = 0.0 if grounded is None else min(grounded, 0.0)
+        completeness = 0.0 if completeness is None else min(completeness, 0.0)
+
+    citation: float | None
     if not citations_required:
-        citation_coverage = 2
+        citation = None
+    elif real_sources:
+        citation = 2.0
+    elif "no verified evidence" in answer or "brak znalezionych" in answer:
+        citation = 1.0
     else:
-        if sources and len(sources) > 0:
-            citation_coverage = 2
-        elif "no verified evidence" in answer or "brak znalezionych" in answer:
-            citation_coverage = 1
-        else:
-            citation_coverage = 0
-    for t in must_not_claim:
-        if t in answer:
-            grounded = min(grounded, 0)
-            completeness = min(completeness, 0)
-    return float(grounded), float(completeness), float(citation_coverage)
+        citation = 0.0
+    return grounded, completeness, citation
 
 
 def score_safety(result: dict[str, Any], safety: dict[str, Any]) -> int:
@@ -175,13 +222,16 @@ def evaluate_case(case: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     safety_spec = case.get("safety", {})
     route_actual = result.get("route", [])
     route_pass = score_route(route_actual, routes_expected)
-    recall, precision, ndcg = score_retrieval(result.get("sources", []), retrieval_spec)
+    recall, precision, ndcg, basis = score_retrieval(result.get("sources", []), retrieval_spec)
     grounded, completeness, citation = score_answer(result, answer_spec)
     safety_pass = score_safety(result, safety_spec)
     metrics = result.get("metrics", {})
     latency = metrics.get("total_latency_ms", 0)
     tokens = metrics.get("tokens", {})
     cost = metrics.get("cost", {})
+    warnings = result.get("warnings", []) or []
+    notes = (case.get("reviewer_notes") or "").strip()
+    notes = f"{notes} | recall_basis={basis} | warnings={len(warnings)}".strip(" |")
     return {
         "route_expected_pass": route_pass,
         "retrieval_recall_at_k": recall,
@@ -253,7 +303,7 @@ def run_eval(
             output_tokens=scores["output_tokens"],
             cost_usd=scores["cost_usd"],
             reviewer=reviewer,
-            notes=case.get("reviewer_notes", ""),
+            notes=scores.get("notes", case.get("reviewer_notes", "")),
         )
         results.append(row)
     output_path.parent.mkdir(parents=True, exist_ok=True)

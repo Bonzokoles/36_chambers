@@ -1,12 +1,12 @@
 # Run as Administrator. Adapt identities to actual local/service accounts.
 # Goal: agents retrieve only from production data; quarantine workers write only in security rooms.
 
-$SecurityRoot = "Z:\36_chambers\.security"
+$SecurityRoot = $env:CHAMBERS_SECURITY_DIR
 $ProductionRoots = @(
-  "R:\repos\active\devz-kb",
-  "R:\mempalace",
-  "U:\_sist2\data",
-  "Z:\36_chambers\The_Buch"
+  $env:DEVZ_KB_ROOT,
+  $env:MEMPALACE_ROOT,
+  $env:SIST2_DATA_ROOT,
+  $env:THE_BUCH_ROOT
 )
 
 # Replace these placeholders with real local/domain users or service accounts.

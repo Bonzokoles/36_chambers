@@ -4,6 +4,11 @@ Install: pip install pandas plotly
 from __future__ import annotations
 import argparse,sqlite3
 from pathlib import Path
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config import path as env_path
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,7 +19,7 @@ def style(fig,title):
 def save(fig,path): fig.write_html(path,include_plotlyjs="cdn",full_html=True)
 def q(con,sql): return pd.read_sql_query(sql,con)
 def main():
- ap=argparse.ArgumentParser(); ap.add_argument("--db",type=Path,default=Path(r"Z:\36_chambers\.doc\observatory\knowledge_observatory.sqlite")); ap.add_argument("--out-dir",type=Path,default=Path(r"Z:\36_chambers\.doc\observatory\dashboard")); args=ap.parse_args(); args.out_dir.mkdir(parents=True,exist_ok=True); con=sqlite3.connect(args.db)
+ ap=argparse.ArgumentParser(); ap.add_argument("--db",type=Path,default=env_path("CHAMBERS_OBSERVATORY_SQLITE")); ap.add_argument("--out-dir",type=Path,default=env_path("CHAMBERS_OBSERVATORY_DASHBOARD")); args=ap.parse_args(); args.out_dir.mkdir(parents=True,exist_ok=True); con=sqlite3.connect(args.db)
  assets=q(con,"SELECT chamber_id, count(*) assets, sum(size_bytes)/1048576.0 size_mb FROM knowledge_assets GROUP BY chamber_id")
  if not assets.empty: save(style(px.bar(assets,x="chamber_id",y="assets",color="size_mb",color_continuous_scale="Blues"),"Knowledge assets by Chamber"),args.out_dir/"knowledge_assets.html")
  visits=q(con,"SELECT chamber_id,agent_name,count(*) visits FROM agent_events GROUP BY chamber_id,agent_name ORDER BY visits DESC")

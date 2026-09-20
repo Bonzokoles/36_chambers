@@ -1,8 +1,8 @@
 # 36 Chambers Cognitive Matrix — Architecture
 
 > **Status:** evolving architecture  
-> **Primary orchestrator:** `Z:\36_chambers\The_Buch\The_brain\agents\shaolin_orchestrator.py`  
-> **Registry:** `Z:\36_chambers\.doc\36_CHAMBERS_REGISTRY.json`
+> **Primary orchestrator:** `$CHAMBERS_ORCHESTRATOR`  
+> **Registry:** `$CHAMBERS_REGISTRY`
 
 ## Purpose
 
@@ -49,15 +49,15 @@ Answer with provenance
 
 | Chamber | Function | Primary location | Engine / access mode | Default safety |
 |---|---|---|---|---|
-| 01 — Eye of Shaolin | Lexical discovery across indexed files | `U:\_sist2\data` | sist2 / SQLite / FTS5 | Read-only |
+| 01 — Eye of Shaolin | Lexical discovery across indexed files | `$SIST2_DATA_ROOT` | sist2 / SQLite / FTS5 | Read-only |
 | 02 — Web Crawler & Edge Search | External or local web retrieval | `localhost:8888` | HTTP service | Read-only |
-| 03 — Grand Knowledge | DEVz technical knowledge | `R:\repos\active\devz-kb\chroma_db_v2` | ChromaDB + SQLite + HNSW | Read-only |
-| 04 — Memory Palace | Long-term semantic memory | `R:\mempalace\palace` | ChromaDB + SQLite + HNSW | Read-only; privacy-sensitive |
-| 05 — Graph of Truth | Entities, facts, and relations | `R:\mempalace\knowledge_graph.sqlite3` | SQLite graph schema | Read-only |
-| 06 — Iron Fist | Controlled code and terminal execution | `Z:\cli_agents` | CLI tools | Explicit approval for writes/execution |
-| 07 — Vector Micro-Engine | Local embedding and vector operations | `U:\_sist2\data\vec0.dll` | sqlite-vec + fastembed | Read-only for search; isolated writes |
-| 08 — Store & Commerce Ops | Commercial data | `Z:\36_chambers\The_Buch\backend\meblepumo.db` | SQLite | Read-only; sensitive business data |
-| 36 — The Buch / Jimbo | Planning, orchestration, audit | `Z:\36_chambers\The_Buch` | Python agents + tool server | Coordinates policy |
+| 03 — Grand Knowledge | DEVz technical knowledge | `$DEVZ_KB_ROOT\chroma_db_v2` | ChromaDB + SQLite + HNSW | Read-only |
+| 04 — Memory Palace | Long-term semantic memory | `$MEMPALACE_ROOT\palace` | ChromaDB + SQLite + HNSW | Read-only; privacy-sensitive |
+| 05 — Graph of Truth | Entities, facts, and relations | `$MEMPALACE_ROOT\knowledge_graph.sqlite3` | SQLite graph schema | Read-only |
+| 06 — Iron Fist | Controlled code and terminal execution | `<CLI tools directory>` | CLI tools | Explicit approval for writes/execution |
+| 07 — Vector Micro-Engine | Local embedding and vector operations | `$SIST2_DATA_ROOT\vec0.dll` | sqlite-vec + fastembed | Read-only for search; isolated writes |
+| 08 — Store & Commerce Ops | Commercial data | `$THE_BUCH_ROOT\backend\meblepumo.db` | SQLite | Read-only; sensitive business data |
+| 36 — The Buch / Jimbo | Planning, orchestration, audit | `$THE_BUCH_ROOT` | Python agents + tool server | Coordinates policy |
 
 ## Orchestrator Contract
 

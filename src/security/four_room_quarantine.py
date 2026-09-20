@@ -12,7 +12,11 @@ import argparse, hashlib, json, mimetypes, os, re, shutil, subprocess, uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(r"Z:\36_chambers\.security")
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config import path as env_path, require as require_path
+
+ROOT = require_path("CHAMBERS_SECURITY_DIR")
 POLICY = Path(__file__).with_name("four_room_policy.json")
 
 # Fallback prompt resolver

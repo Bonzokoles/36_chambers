@@ -2,10 +2,10 @@
 # Wymagania: Python 3.10+, pip, PowerShell
 
 param(
-    [string]$Golden = "Z:\36_chambers\.doc\golden_queries.yaml",
-    [string]$Registry = "Z:\36_chambers\.doc\36_CHAMBERS_REGISTRY.json",
-    [string]$Orchestrator = "Z:\36_chambers\The_Buch\The_brain\agents\shaolin_orchestrator.py",
-    [string]$OutputDir = "Z:\36_chambers\.doc\eval_run",
+    [string]$Golden = $env:CHAMBERS_GOLDEN_QUERIES,
+    [string]$Registry = $env:CHAMBERS_REGISTRY,
+    [string]$Orchestrator = $env:CHAMBERS_ORCHESTRATOR,
+    [string]$OutputDir = $env:CHAMBERS_EVAL_RUN_DIR,
     [string]$SystemVersion = "shaolin-1.0",
     [string]$Model = "local-deterministic",
     [string]$PythonExe = "",
@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 
 # 1. Wykrywanie interpretera Python (preferencja dla venv The_Buch)
 if (-not $PythonExe) {
-    $VenvPy = "Z:\36_chambers\The_Buch\backend\venv\Scripts\python.exe"
+    $VenvPy = if ($env:CHAMBERS_ROOT) { Join-Path $env:CHAMBERS_ROOT "The_Buch\backend\venv\Scripts\python.exe" } else { "" }
     if (Test-Path $VenvPy) {
         $PythonExe = $VenvPy
     } else {
@@ -35,8 +35,7 @@ $null = New-Item -ItemType Directory -Force -Path $DashboardDir
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CandidateRunners = @(
     (Join-Path $ScriptRoot "eval_runner.py"),
-    (Join-Path $ScriptRoot "..\eval_runner.py"),
-    "Z:\36_chambers\The_Buch\The_brain\agents\eval_runner.py"
+    (Join-Path $ScriptRoot "..\eval_runner.py")
 )
 $EvalRunner = $CandidateRunners | Where-Object { Test-Path $_ } | Select-Object -First 1
 
@@ -70,7 +69,7 @@ if (-not $SkipEval) {
 } else {
     Write-Host "Pominięto ewaluację (-SkipEval). Weryfikacja istniejącego pliku CSV..." -ForegroundColor Yellow
     if (-not (Test-Path $CsvPath)) {
-        $GlobalCsv = "Z:\36_chambers\.doc\eval_results.csv"
+        $GlobalCsv = $env:CHAMBERS_EVAL_RESULTS
         if (Test-Path $GlobalCsv) {
             Write-Host "Kopiowanie istniejącego pliku z $GlobalCsv do $CsvPath..." -ForegroundColor Cyan
             Copy-Item $GlobalCsv $CsvPath -Force

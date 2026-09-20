@@ -29,16 +29,16 @@ Launcher instaluje `pandas` i `plotly`, wykonuje metadata-only snapshot registry
 
 ```powershell
 .\run_knowledge_observatory.ps1 `
-  -Registry "Z:\36_chambers\.doc\36_CHAMBERS_REGISTRY.json" `
-  -Db "Z:\36_chambers\.doc\observatory\knowledge_observatory.sqlite" `
-  -OutDir "Z:\36_chambers\.doc\observatory\dashboard" `
+  -Registry "$CHAMBERS_REGISTRY" `
+  -Db "$CHAMBERS_OBSERVATORY_SQLITE" `
+  -OutDir "$CHAMBERS_OBSERVATORY_DASHBOARD" `
   -OpenDashboard
 ```
 
 Wyniki:
 
 ```text
-Z:\36_chambers\.doc\observatory\
+<observatory directory>\
   knowledge_observatory.sqlite
   dashboard\
     knowledge_assets.html
@@ -70,7 +70,7 @@ Import:
 
 ```powershell
 .\run_knowledge_observatory.ps1 `
-  -EventLog "Z:\36_chambers\.doc\observatory\events\retrieval_2026-09-20.jsonl" `
+  -EventLog "<events directory>\retrieval_YYYY-MM-DD.jsonl" `
   -OpenDashboard
 ```
 

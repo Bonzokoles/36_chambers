@@ -1,8 +1,8 @@
 # 36 Chambers Knowledge Observatory launcher
 param(
- [string]$Registry="Z:\36_chambers\.doc\36_CHAMBERS_REGISTRY.json",
- [string]$Db="Z:\36_chambers\.doc\observatory\knowledge_observatory.sqlite",
- [string]$OutDir="Z:\36_chambers\.doc\observatory\dashboard",
+ [string]$Registry=$env:CHAMBERS_REGISTRY,
+ [string]$Db=$env:CHAMBERS_OBSERVATORY_SQLITE,
+ [string]$OutDir=$env:CHAMBERS_OBSERVATORY_DASHBOARD,
  [string]$EventLog="",
  [string]$PythonExe="",
  [switch]$OpenDashboard
@@ -12,7 +12,7 @@ $root=Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # 1. Wybór interpretera Python
 if (-not $PythonExe) {
-    $VenvPy = "Z:\36_chambers\The_Buch\backend\venv\Scripts\python.exe"
+    $VenvPy = if ($env:CHAMBERS_ROOT) { Join-Path $env:CHAMBERS_ROOT "The_Buch\backend\venv\Scripts\python.exe" } else { "" }
     if (Test-Path $VenvPy) {
         $PythonExe = $VenvPy
     } else {
@@ -28,8 +28,8 @@ if ($LASTEXITCODE -ne 0) { throw "Błąd skanowania inwentarza" }
 
 # 3. Import telemetrii zdarzeń (jeśli wskazana lub domyślna istnieje)
 if (-not $EventLog) {
-    $DefaultLog = "Z:\36_chambers\.doc\observatory\events\events.jsonl"
-    if (Test-Path $DefaultLog) {
+    $DefaultLog = $env:CHAMBERS_OBSERVATORY_EVENTS
+    if ($DefaultLog -and (Test-Path $DefaultLog)) {
         $EventLog = $DefaultLog
     }
 }

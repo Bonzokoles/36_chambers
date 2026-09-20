@@ -4,7 +4,7 @@ Wymagania:
     pip install duckdb altair pandas
 
 Użycie:
-    python dashboard_eval.py --input Z:\36_chambers\.doc\eval_results.csv
+    python dashboard_eval.py --input <path to eval_results.csv>
 
 Zapisuje wykresy jako HTML w tym samym katalogu co CSV.
 """

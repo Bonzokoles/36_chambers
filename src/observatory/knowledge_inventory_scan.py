@@ -8,8 +8,12 @@ import argparse, hashlib, json, os, socket, sqlite3, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_REGISTRY=Path(r"Z:\36_chambers\.doc\36_CHAMBERS_REGISTRY.json")
-DEFAULT_DB=Path(r"Z:\36_chambers\.doc\observatory\knowledge_observatory.sqlite")
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config import path as env_path
+
+DEFAULT_REGISTRY = env_path("CHAMBERS_REGISTRY")
+DEFAULT_DB = env_path("CHAMBERS_OBSERVATORY_SQLITE")
 SCHEMA=Path(__file__).with_name("knowledge_observatory_schema.sql")
 
 def iso(): return datetime.now(timezone.utc).isoformat(timespec="seconds")
