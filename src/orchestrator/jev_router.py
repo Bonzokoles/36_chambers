@@ -26,6 +26,7 @@ JEV_API = "https://api.typesafe.ai/v1/systemone"
 CHAMBER_CRITERIA = {
     "01_sist2": "Full-text file search (FTS5). Use for: find files by name, search file contents, discover documents on disk.",
     "03_chroma": "Semantic knowledge base (ChromaDB). Use for: technical knowledge, project docs, AI/ML topics, product catalogs, ecommerce content.",
+    "04_hollow_bones": "Personal memory store (ChromaDB). Use for: user preferences, memories, history, physical attributes (weight, height), user measurements, personal habits.",
     "05_graph": "Knowledge graph (SQLite triples). Use for: entity relationships, facts about people/projects, provenance queries.",
     "08_bizops": "Business operations (SQLite). Use for: product prices, orders, inventory, chat history, transactional records.",
     "unknown": "Query does not match any chamber. Use for: general chat, meta-questions, unclear intent.",

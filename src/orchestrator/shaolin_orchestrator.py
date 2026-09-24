@@ -331,6 +331,7 @@ def decompose_query(state: State) -> State:
             chamber_to_intent = {
                 "01_sist2": "file_discovery",
                 "03_chroma": "technical_knowledge",
+                "04_hollow_bones": "memory",
                 "05_graph": "graph",
                 "08_bizops": "commerce",
             }
@@ -1337,3 +1338,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
