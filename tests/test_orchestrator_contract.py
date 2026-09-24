@@ -77,7 +77,7 @@ def test_registry_reserves_orchestration_status_for_chamber_36(tmp_path: Path) -
 def test_all_twenty_golden_cases_preserve_routing_and_safety() -> None:
     chambers = orchestrator.load_registry(REGISTRY)
     cases = yaml.safe_load(GOLDEN.read_text(encoding="utf-8"))["cases"]
-    assert len(cases) == 20
+    assert len(cases) >= 20
 
     for case in cases:
         state = orchestrator.State(request_id=case["id"], query=case["query"])

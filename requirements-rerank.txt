@@ -1,0 +1,6 @@
+# Optional re-ranker dependencies (local, no API key needed).
+# Install with: pip install -r requirements-rerank.txt
+#
+# Used as the final fallback in rerank_evidence() after Jev Noul and HTTP/Cohere.
+
+fastembed>=0.3.0       # local BGE cross-encoder for zero-cost re-ranking

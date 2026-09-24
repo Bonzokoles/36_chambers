@@ -3,7 +3,7 @@
 > **Project:** 36 Chambers Cognitive Matrix  
 > **Status:** Living architecture baseline  
 > **Audience:** maintainers, contributors, security reviewers, AI architects and deployment operators  
-> **Version:** 0.1.0  
+> **Version:** 0.2.0  
 > **Last reviewed:** 2026-09-20
 
 ## 1. Purpose
@@ -119,6 +119,18 @@ Observability: traces -> import -> knowledge observatory -> dashboard
 **Why:** Prevents false knowledge and preserves leak-detection value.
 
 **Consequence:** Public demo canaries must differ from private markers.
+
+### ADR-007 — TypeSafe/Jev as the decision layer
+
+**Decision:** Query routing and evidence re-ranking use the TypeSafe System One model **Jev** (`jev-latest`) via its HTTP API, gated by a confidence threshold of `0.6` for routing. All Jev features are opt-in behind a `TYPESAFE_API_KEY` and feature flags (`CHAMBERS_RERANK_ENABLED`, `CHAMBERS_SYNTHESIS_ENABLED`).
+
+**Why:** Jev returns fast, calibrated, typed judgments (`Choice` with probabilities + confidence, `Noul` probability) that code can consume directly — a better fit for routing/ranking than parsing free-text LLM output. Deterministic keyword routing stays as the zero-cost fallback.
+
+**Consequence:**
+- Without `TYPESAFE_API_KEY`, routing is deterministic (keyword match) and re-ranking falls back to HTTP/Cohere then local BGE — zero mandatory dependency.
+- Re-ranking incurs N Jev calls (one per evidence item); cost scales with retrieved set size.
+- Confidence is treated as a routing gate, not an absolute truth: `confidence >= 0.6` accepts the Jev route, below that the orchestrator re-routes heuristically.
+- Judgment thresholds must be validated in the target domain (per TypeSafe guidance), not copied from demos.
 
 ## 6. Data lifecycle states
 
