@@ -4,7 +4,7 @@
 $SecurityRoot = $env:CHAMBERS_SECURITY_DIR
 $ProductionRoots = @(
   $env:DEVZ_KB_ROOT,
-  $env:MEMPALACE_ROOT,
+  $env:HOLLOW_BONES_ROOT,
   $env:SIST2_DATA_ROOT,
   $env:THE_BUCH_ROOT
 )

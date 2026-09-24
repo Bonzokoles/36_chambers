@@ -48,10 +48,10 @@
       "id": 4,
       "name": "Memory Palace",
       "specialization": "Long-term episodic and semantic memory",
-      "engine": "ChromaDB / MemPalace",
-      "physical_path": "./examples/demo_data/mempalace",
+      "engine": "ChromaDB / Hollow Bones",
+      "physical_path": "./examples/demo_data/hollow_bones",
       "status": "implemented",
-      "adapter": "chroma_mempalace",
+      "adapter": "chroma_hollow_bones",
       "route_modes": ["semantic"],
       "access_mode": "read_only"
     },

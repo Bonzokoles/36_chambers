@@ -3,7 +3,7 @@
 Integrates read-only database adapters for:
 - Chamber 01 (sist2 document index / FTS5)
 - Chamber 03 (DEVz Knowledge Base / ChromaDB)
-- Chamber 04 (MemPalace / ChromaDB)
+- Chamber 04 (Hollow Bones / ChromaDB)
 - Chamber 05 (Graph of Truth / SQLite triples & entities)
 - Chamber 06 (The Iron Fist / Policy gate for write & execution)
 - Chamber 08 (Store & Operations / SQLite chat.db)
@@ -363,7 +363,7 @@ def decompose_query(state: State) -> State:
     )):
         state.intent, state.subqueries = "graph", [state.query]
     elif any(term in q for term in (
-        "pamię", "pamie", "preferencj", "histori", "mempalace", "drawer", "closet", "pomiar",
+        "pamię", "pamie", "preferencj", "histori", "hollow_bones", "drawer", "closet", "pomiar",
         "memory", "preference", "history", "recall",
     )):
         state.intent, state.subqueries = "memory", [state.query]
@@ -698,8 +698,8 @@ def adapter_chamber_03_devz_kb(chamber: Chamber, query: str, limit: int = 5) -> 
     return evidence_list
 
 
-def adapter_chamber_04_mempalace(chamber: Chamber, query: str, limit: int = 5) -> list[Evidence]:
-    """Chamber 04: MemPalace agent memories and closets."""
+def adapter_chamber_04_hollow_bones(chamber: Chamber, query: str, limit: int = 5) -> list[Evidence]:
+    """Chamber 04: Hollow Bones agent memories and closets."""
     if chromadb is None:
         raise RuntimeError("chromadb library is not installed")
 
@@ -715,9 +715,9 @@ def adapter_chamber_04_mempalace(chamber: Chamber, query: str, limit: int = 5) -
                 chamber_id=chamber.id,
                 chamber_name=chamber.name,
                 resource_path=str(root),
-                method="mempalace_query",
+                method="hollow_bones_query",
                 record_id=None,
-                content="No collections found in MemPalace ChromaDB.",
+                content="No collections found in Hollow Bones ChromaDB.",
                 metadata={"query": query},
             )
         ]
@@ -739,7 +739,7 @@ def adapter_chamber_04_mempalace(chamber: Chamber, query: str, limit: int = 5) -
                         chamber_id=chamber.id,
                         chamber_name=chamber.name,
                         resource_path=str(root),
-                        method=f"mempalace[{coll.name}]",
+                        method=f"hollow_bones[{coll.name}]",
                         record_id=doc_id,
                         content=f"[{coll.name}] memory_id={doc_id}: {clean_text}",
                         metadata={"collection": coll.name, "doc_id": doc_id, "meta": meta},
@@ -754,9 +754,9 @@ def adapter_chamber_04_mempalace(chamber: Chamber, query: str, limit: int = 5) -
                 chamber_id=chamber.id,
                 chamber_name=chamber.name,
                 resource_path=str(root),
-                method="mempalace_query",
+                method="hollow_bones_query",
                 record_id=None,
-                content=f"No matching memories found in MemPalace for query: '{query}'",
+                content=f"No matching memories found in Hollow Bones for query: '{query}'",
                 metadata={"query": query},
             )
         )
@@ -965,7 +965,7 @@ def adapter_chamber_08_commerce_ops(chamber: Chamber, query: str, limit: int = 5
 ADAPTERS: dict[str, Callable[[Chamber, str, int], list[Evidence]]] = {
     "sist2": adapter_chamber_01_sist2,
     "chroma_devz": adapter_chamber_03_devz_kb,
-    "chroma_mempalace": adapter_chamber_04_mempalace,
+    "chroma_hollow_bones": adapter_chamber_04_hollow_bones,
     "graph_sqlite": adapter_chamber_05_graph,
     "policy_gate": adapter_chamber_06_policy_gate,
     "commerce_sqlite": adapter_chamber_08_commerce_ops,
@@ -974,7 +974,7 @@ ADAPTERS: dict[str, Callable[[Chamber, str, int], list[Evidence]]] = {
 ADAPTER_ROUTE_MODES: dict[str, set[str]] = {
     "sist2": {"fts"},
     "chroma_devz": {"semantic"},
-    "chroma_mempalace": {"semantic"},
+    "chroma_hollow_bones": {"semantic"},
     "graph_sqlite": {"graph_sql"},
     "policy_gate": {"policy_gate"},
     "commerce_sqlite": {"sql"},

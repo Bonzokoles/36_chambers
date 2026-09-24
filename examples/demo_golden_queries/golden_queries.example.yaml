@@ -162,7 +162,7 @@ cases:
 
   - id: DEMO-018
     scenario: memory_recall
-    query: "What does MemPalace remember about this preference?"
+    query: "What does Hollow Bones remember about this preference?"
     routes_expected: {required: [4], allowed: [5], forbidden: [7, 8]}
     retrieval: {required_evidence_ids: [], required_terms: ["preference"], top_k: 5}
     answer: {must_include: ["preference"], must_not_claim: [], citations_required: true}

@@ -52,8 +52,8 @@ Answer with provenance
 | 01 — Eye of Shaolin | Lexical discovery across indexed files | `$SIST2_DATA_ROOT` | sist2 / SQLite / FTS5 | Read-only |
 | 02 — Web Crawler & Edge Search | Planned external or local web retrieval | Registry endpoint | Not implemented | Read-only |
 | 03 — Grand Knowledge | DEVz technical knowledge | `$DEVZ_KB_ROOT\chroma_db_v2` | ChromaDB + SQLite + HNSW | Read-only |
-| 04 — Memory Palace | Long-term semantic memory | `$MEMPALACE_ROOT\palace` | ChromaDB + SQLite + HNSW | Read-only; privacy-sensitive |
-| 05 — Graph of Truth | Entities, facts, and relations | `$MEMPALACE_ROOT\knowledge_graph.sqlite3` | SQLite graph schema | Read-only |
+| 04 — Memory Palace | Long-term semantic memory | `$HOLLOW_BONES_ROOT\palace` | ChromaDB + SQLite + HNSW | Read-only; privacy-sensitive |
+| 05 — Graph of Truth | Entities, facts, and relations | `$HOLLOW_BONES_ROOT\knowledge_graph.sqlite3` | SQLite graph schema | Read-only |
 | 06 — Iron Fist | Controlled code and terminal execution | `<CLI tools directory>` | CLI tools | Explicit approval for writes/execution |
 | 07 — Vector Micro-Engine | Planned local embedding and vector operations | Not defined | Not implemented | No route |
 | 08 — Store & Commerce Ops | Commercial data | `$THE_BUCH_ROOT\backend\meblepumo.db` | SQLite | Read-only; sensitive business data |
