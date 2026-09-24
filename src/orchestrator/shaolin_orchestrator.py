@@ -24,6 +24,7 @@ import sqlite3
 import sys
 import time
 import urllib.parse
+import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -304,17 +305,52 @@ def has_security_block_intent(query: str) -> bool:
 
 
 def decompose_query(state: State) -> State:
+    """Decompose query into intent + subqueries. Uses Jev (TypeSafe) when available,
+    falls back to keyword matching on low confidence or API errors."""
+    
+    # ── Security checks ALWAYS run first (safety-critical, never delegated) ──
     q = state.query.lower()
     if has_security_block_intent(q):
         state.intent = "prompt_injection_attack"
         state.subqueries = [state.query]
         state.policy_blocked = True
-    elif has_mutation_intent(q):
+        return state
+    if has_mutation_intent(q):
         state.intent = "execution"
         state.subqueries = [state.query]
         state.write_intent = True
         state.policy_blocked = True
-    elif any(term in q for term in (
+        return state
+
+    # ── Jev routing (primary) ──────────────────────────────
+    try:
+        from .jev_router import route_query as jev_route
+        decision = jev_route(state.query)
+        if decision.mode == "jev" and decision.confidence >= 0.6:
+            # Map Jev chamber → intent
+            chamber_to_intent = {
+                "01_sist2": "file_discovery",
+                "03_chroma": "technical_knowledge",
+                "05_graph": "graph",
+                "08_bizops": "commerce",
+            }
+            intent = chamber_to_intent.get(decision.chamber, "technical_knowledge")
+            state.intent = intent
+            state.subqueries = [state.query]
+            state.metrics["jev_confidence"] = decision.confidence
+            state.metrics["jev_chamber"] = decision.chamber
+            state.metrics["route_source"] = "jev"
+            return state
+        # Low confidence → fall through to keyword routing
+        if decision.mode == "jev":
+            state.metrics["jev_fallback_reason"] = f"low_confidence({decision.confidence:.2f})"
+    except Exception as e:
+        # Any Jev error (credits, network, API) → fall through
+        state.metrics["jev_fallback_reason"] = f"error({type(e).__name__})"
+
+    # ── Keyword routing (fallback) ──────────────────────────
+    state.metrics["route_source"] = "keyword"
+    if any(term in q for term in (
         "cena", "ceny", "cene", "cenie", "cenow", "marż", "marz", "faktur", "produkt",
         "dostawc", "sklep", "zamów", "zamow", "konwersacj", "sprzeda", "magazyn", "zapas", "inwentarz",
         "price", "product", "supplier", "store", "inventory", "stock", "conversation",
@@ -1095,6 +1131,163 @@ def log_observatory_events(state: State, result: dict[str, Any]) -> None:
         pass
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Synteza generatywna (Chamber 36) — ADDYTYWNA, domyslnie OFF.
+# aggregate() pozostaje deterministyczny (kontrakt); synteza doklada cited answer
+# tylko gdy CHAMBERS_SYNTHESIS_ENABLED=1 i skonfigurowany endpoint OpenAI-compatible.
+# ─────────────────────────────────────────────────────────────────────────────
+def _synthesis_enabled() -> bool:
+    return os.getenv("CHAMBERS_SYNTHESIS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def synthesize(result: dict[str, Any], state: State) -> dict[str, Any]:
+    """Dokłada odpowiedz LLM z cytowaniami na wierzch deterministycznego evidence-packa.
+
+    Fail-soft: gdy wylaczone/blad -> zwraca wynik bez zmian (poza polem synthesis).
+    """
+    if not _synthesis_enabled():
+        return result
+    base = (
+        os.getenv("CHAMBERS_SYNTHESIS_BASE_URL")
+        or os.getenv("LLM_BASE_URL")
+        or os.getenv("OPENROUTER_BASE_URL")
+    )
+    key = (
+        os.getenv("CHAMBERS_SYNTHESIS_API_KEY")
+        or os.getenv("LLM_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+    )
+    model = os.getenv("CHAMBERS_SYNTHESIS_MODEL") or os.getenv("LLM_MODEL") or "openrouter/auto"
+    if not base or not key:
+        result["synthesis"] = {
+            "chamber_id": 36,
+            "status": "unavailable",
+            "detail": "brak CHAMBERS_SYNTHESIS_BASE_URL/API_KEY",
+        }
+        return result
+
+    evidence = result.get("sources") or []
+    if not evidence:
+        return result
+
+    ctx = "\n".join(
+        "[{}:{}] {}".format(e.get("chamber_id"), e.get("record_id"), str(e.get("content", ""))[:600])
+        for e in evidence[:ANSWER_EVIDENCE_LIMIT]
+    )
+    prompt = (
+        "Jestes syntezatorem 36 Chambers. Odpowiedz TYLKO na podstawie DOWODOW. "
+        "Kazde twierdzenie oznacz zrodlem jako [chamber:record]. Gdy brak danych - powiedz to wprost.\n\n"
+        "PYTANIE: {}\n\nDOWODY:\n{}\n\nODPOWIEDZ:".format(state.query, ctx)
+    )
+    try:
+        payload = json.dumps(
+            {"model": model, "messages": [{"role": "user", "content": prompt}],
+             "temperature": 0.2, "max_tokens": 700}
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            base.rstrip("/") + "/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+        )
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+        if not text:
+            raise RuntimeError("empty synthesis")
+        if "answer_deterministic" not in result:
+            result["answer_deterministic"] = result.get("answer")
+        result["answer"] = text
+        result["answer_mode"] = "synthesis"
+        result["synthesis"] = {
+            "chamber_id": 36,
+            "status": "enabled",
+            "detail": "LLM synthesis over evidence pack",
+            "model": model,
+            "citations": [
+                {"chamber_id": e.get("chamber_id"), "record_id": e.get("record_id")}
+                for e in evidence[:ANSWER_EVIDENCE_LIMIT]
+            ],
+        }
+    except Exception as exc:  # fail-soft: zostaje deterministyczny pack
+        result["synthesis"] = {"chamber_id": 36, "status": "error", "detail": str(exc)[:200]}
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rerank (krok 35) — ADDYTYWNY, domyslnie OFF. Przelicza kolejnosc dowodow.
+# Backend: HTTP (Cohere-compatible /rerank) albo lokalny fastembed cross-encoder.
+# Read-only wobec zrodel: zapisuje tylko rerank_score w metadata dowodu.
+# ─────────────────────────────────────────────────────────────────────────────
+def _rerank_enabled() -> bool:
+    return os.getenv("CHAMBERS_RERANK_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _rerank_http(query: str, docs: list[str]) -> list[float]:
+    url = os.getenv("CHAMBERS_RERANK_URL")
+    key = os.getenv("CHAMBERS_RERANK_API_KEY") or os.getenv("COHERE_API_KEY")
+    model = os.getenv("CHAMBERS_RERANK_MODEL", "rerank-v3.5")
+    if not url or not key:
+        raise RuntimeError("brak CHAMBERS_RERANK_URL/API_KEY")
+    payload = json.dumps({"model": model, "query": query, "documents": docs, "top_n": len(docs)}).encode("utf-8")
+    req = urllib.request.Request(
+        url.rstrip("/") + "/rerank", data=payload,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
+    )
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    scores = [0.0] * len(docs)
+    for item in data.get("results", []):
+        idx = item.get("index")
+        if isinstance(idx, int) and 0 <= idx < len(docs):
+            scores[idx] = float(item.get("relevance_score", 0.0))
+    return scores
+
+
+def _rerank_local(query: str, docs: list[str]) -> list[float]:
+    from fastembed.rerank.cross_encoder import TextCrossEncoder  # optional dependency
+    model = os.getenv("CHAMBERS_RERANK_LOCAL_MODEL", "BAAI/bge-reranker-v2-m3")
+    enc = TextCrossEncoder(model_name=model)
+    return [float(s) for s in enc.rerank(query, docs)]
+
+
+def rerank_evidence(state: State) -> None:
+    """Przelicza kolejnosc dowodow rerankerem; fail-soft (przy bledzie kolejnosc bez zmian).
+    Priority: Jev Noul → HTTP (Cohere) → local BGE cross-encoder."""
+    if not _rerank_enabled() or not state.evidence:
+        return
+    try:
+        docs = [str(e.content or "") for e in state.evidence]
+        # 1. Jev re-rank (fast, cheap, primary)
+        try:
+            from .jev_router import rerank as jev_rerank
+            scores = jev_rerank(state.query, docs)
+            if any(s > 0 for s in scores):
+                state.metrics["rerank_backend"] = "jev"
+                for i, e in enumerate(state.evidence):
+                    s = float(scores[i]) if i < len(scores) else 0.0
+                    e.metadata["rerank_score"] = s
+                    e.score = s
+                state.evidence.sort(key=lambda e: e.score or 0.0, reverse=True)
+                return
+        except Exception:
+            pass  # Jev failed → try HTTP
+        # 2. HTTP reranker
+        try:
+            scores = _rerank_http(state.query, docs)
+            state.metrics["rerank_backend"] = "http"
+        except Exception:
+            # 3. Local BGE cross-encoder
+            scores = _rerank_local(state.query, docs)
+            state.metrics["rerank_backend"] = "local"
+        for i, e in enumerate(state.evidence):
+            s = float(scores[i]) if i < len(scores) else 0.0
+            e.metadata["rerank_score"] = s
+            e.score = s
+        state.evidence.sort(key=lambda e: float(e.metadata.get("rerank_score") or 0.0), reverse=True)
+    except Exception as exc:  # rerank nie moze wywrocic orkiestracji
+        state.warnings.append("rerank skipped: " + str(exc)[:160])
+
+
 def run(
     query: str,
     registry_path: Path | None = DEFAULT_REGISTRY,
@@ -1109,10 +1302,12 @@ def run(
     timed(state, "decomposition", lambda: decompose_query(state))
     timed(state, "routing", lambda: route_query(state, chambers))
     timed(state, "retrieval_total", lambda: retrieve(state, chambers))
+    timed(state, "rerank", lambda: rerank_evidence(state))
     timed(state, "verification", lambda: verify_evidence(state))
     result = timed(state, "aggregation", lambda: aggregate(state))
     state.metrics["total_latency_ms"] = now_ms() - total_start
     result["metrics"] = state.metrics
+    result = synthesize(result, state)
     write_trace(result, trace_dir)
     log_observatory_events(state, result)
     return result
