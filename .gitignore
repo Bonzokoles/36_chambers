@@ -3,6 +3,17 @@
 # Chroni prywatne katalogi robocze przed wyciekiem do publicznego repo.
 # ================================================================
 
+# === KONWENCJA: prefiks "_" lub "." = prywatne (razem z zawartością) ===
+# Reguła generyczna — nie trzeba wymieniać każdego katalogu pojedynczo.
+# Negacje MUSZĄ być NIŻEJ, inaczej skasujesz CI (.github) i .env.example.
+_*
+.*
+!.github/
+!.github/**
+!.gitignore
+!.gitattributes
+!.env.example
+
 # === PRIVATE WORKSPACE (nigdy nie pushować) ===
 .doc/
 .omx/
@@ -52,6 +63,7 @@ audit_logs/
 # === Python/runtime ===
 .venv/
 venv/
+ci_env/
 __pycache__/
 .pytest_cache/
 .mypy_cache/

@@ -16,8 +16,9 @@
 - **Jev (TypeSafe) integration** — AI-powered query routing and re-ranking via the System One model. Jev decomposes user queries into chamber routes with confidence scores, and re-ranks evidence using Noul probability judgments.
 - **Confidence-gated routing** — routes queries through Jev when confidence ≥ 0.6; falls back to keyword matching on low confidence or API errors (fail-soft).
 - **Evidence re-ranking** — re-sorts retrieved evidence by relevance using Jev Noul, HTTP (Cohere-compatible), or local BGE cross-encoder.
-- **Generative synthesis** (optional) — LLM-based answer synthesis with source citations over evidence packs.
-- **Safe by default** — Jev is optional. Without a `TYPESAFE_API_KEY`, the orchestrator uses deterministic keyword routing. All new features are feature-flagged off in `.env`.
+- **Deterministic Extractive Synthesis** (Chamber 36 opt-in `--synthesize`) — Assembles grounded answers strictly from retrieved evidence sentences with 100% verifiable citations. Zero hallucinations, zero token costs, with automatic sufficiency gating (sufficiency < 0.5 triggers explicit missing-evidence notice).
+- **Hardened Local Vectors & Zero Telemetry** — ChromaDB PersistentClient configured with `anonymized_telemetry=False` and `allow_reset=False` to preserve privacy and prevent accidental database resets.
+- **Safe by default** — Jev is optional. Without a `TYPESAFE_API_KEY`, the orchestrator uses deterministic keyword routing. All advanced features are safe and opt-in.
 
 ---
 
@@ -43,7 +44,7 @@
 │  │ Jev Noul → HTTP → local BGE  │    │
 │  └──────────────────────────────┘    │
 │  ┌──────────────────────────────┐    │
-│  │ Synthesis (optional LLM)     │    │
+│  │ Extractive Synthesis         │    │
 │  │ cited answer from evidence   │    │
 │  └──────────────────────────────┘    │
 └───────────────────┬──────────────────┘
@@ -53,7 +54,7 @@
      ▼              ▼              ▼
 ┌─────────┐  ┌───────────┐  ┌──────────┐
 │ CH. 01  │  │  CH. 03   │  │  CH. 05  │
-│ sist2   │  │ ChromaDB  │  │  Graph   │
+│ SQLite  │  │ ChromaDB  │  │  Graph   │
 │ FTS5    │  │ Semantic  │  │ Triples  │
 └─────────┘  └───────────┘  └──────────┘
 ```
@@ -62,7 +63,7 @@
 
 | Chamber | Name | Engine | Role |
 |---|---|---|---|
-| 01 | Eye of Shaolin | SQLite FTS5 / sist2 | Full-text file discovery |
+| 01 | Eye of Shaolin | SQLite FTS5 / B-tree | Full-text document & file discovery |
 | 02 | Web Crawler | HTTP (planned) | External web retrieval |
 | 03 | Grand Knowledge | ChromaDB | Semantic project knowledge |
 | 04 | Memory Palace | ChromaDB | Long-term memory |
@@ -70,7 +71,7 @@
 | 06 | Iron Fist | Policy Gate | Mutation blocking, security |
 | 07 | Vector Micro-Engine | Planned | Local embeddings |
 | 08 | Store & Operations | SQLite | Business data, transactions |
-| 36 | **Master Engine** | **Orchestrator** | **Routing, re-ranking, synthesis** |
+| 36 | **Master Engine** | **Orchestrator** | **Routing, re-ranking, extractive synthesis** |
 
 ---
 
@@ -104,6 +105,9 @@ cp .env.example .env
 # Keyword routing (no API key needed):
 python src/orchestrator/shaolin_orchestrator.py "where is the agent provider configured?"
 
+# Extractive deterministic synthesis with verifiable citations:
+python src/orchestrator/shaolin_orchestrator.py "what documents discuss the security pipeline?" --synthesize
+
 # With Jev routing (set TYPESAFE_API_KEY in .env):
 python src/orchestrator/shaolin_orchestrator.py "what documents discuss the security pipeline?"
 ```
@@ -117,10 +121,7 @@ TYPESAFE_API_KEY=tsk_...
 # Evidence re-ranking (by relevance)
 CHAMBERS_RERANK_ENABLED=1
 
-# LLM answer synthesis from evidence
-CHAMBERS_SYNTHESIS_ENABLED=1
-CHAMBERS_SYNTHESIS_BASE_URL=https://api.openrouter.ai/v1
-CHAMBERS_SYNTHESIS_API_KEY=sk-or-...
+# Extractive synthesis is built-in and enabled via --synthesize (no extra API key required)
 ```
 
 ---
@@ -139,7 +140,7 @@ CHAMBERS_SYNTHESIS_API_KEY=sk-or-...
 
 | Chamber | Jev sees this as |
 |---|---|
-| `01_sist2` | "Full-text file search (FTS5)" |
+| `01_documents` | "Full-text document search (SQLite FTS5)" |
 | `03_chroma` | "Semantic knowledge base (ChromaDB)" |
 | `05_graph` | "Knowledge graph (SQLite triples)" |
 | `08_bizops` | "Business operations (SQLite)" |
@@ -164,11 +165,11 @@ Jev Noul → HTTP (Cohere) → local BGE cross-encoder
 
 ### Four-Room Security Pipeline
 
-Untrusted intake follows a 72-hour security cycle:
-1. **Invitation Room** — SHA-256 fingerprinting, injection heuristic analysis
-2. **Rookie Validation** — Isolated LLM evaluation with strict JSON schemas
-3. **Retirement Quarantine** — Pre-retirement dependency analysis
-4. **Deletion Hold** — Restore testing and final approval
+Untrusted intake follows a hardened quarantine cycle:
+1. **Invitation Room (`00_Invitation_Room`)** — SHA-256 fingerprinting, header-based MIME verification, extension allowlists, injection heuristic analysis, and real Defender scanning (`MpCmdRun`).
+2. **Rookie Validation (`01_Rookie_Validation`)** — Isolated verification with strict JSON schemas and 36-hour quarantine hold.
+3. **Retirement Quarantine (`98_Retirement_Quarantine`)** — Pre-retirement dependency analysis.
+4. **Deletion Hold (`99_Deletion_Hold`)** — 48-hour retention hold with automated purge and scheduled infection self-tests.
 
 ### Knowledge Observatory
 
