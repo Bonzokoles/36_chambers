@@ -9,7 +9,21 @@
     "engine": "FastAPI / Python Hybrid Orchestrator",
     "status": "orchestration_only",
     "synthesis_status": "not_implemented",
-    "answer_mode": "evidence_aggregation"
+    "answer_mode": "evidence_aggregation",
+    "synthesis": {
+      "status": "implemented",
+      "method": "extractive-deterministic",
+      "since": "2026-09-29",
+      "entrypoint": "--synthesize",
+      "default_mode": "evidence_aggregation",
+      "invariants": [
+        "answer built only from the evidence pack; no model-generated prose",
+        "every claim carries a citation marker resolved in citations[]",
+        "sufficiency < 0.5 => explicit 'no verified evidence', fragments shown as fragments only",
+        "policy gate active => synthesis suppressed",
+        "without --synthesize the pack stays evidence_aggregation"
+      ]
+    }
   },
   "chambers": [
     {

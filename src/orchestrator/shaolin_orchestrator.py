@@ -34,8 +34,11 @@ from typing import Any
 
 # Host-specific paths resolve from environment via config.py (see .env.example).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import path as env_path
 from config import require as require_path
+
+import synthesis  # noqa: E402  Chamber 36: synteza wylacznie z dowodow (opt-in --synthesize)
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -122,6 +125,7 @@ class State:
     timeout_s: float = 15.0
     allow_web: bool = False
     write_intent: bool = False
+    synthesize: bool = False
     policy_blocked: bool = False
     intent: str = "unknown"
     subqueries: list[str] = field(default_factory=list)
@@ -190,7 +194,7 @@ def validate_registry(chambers: dict[int, Chamber]) -> None:
                 f"Non-retrieval chamber {chamber.id} must not declare an adapter or route_modes"
             )
     if 36 in chambers and chambers[36].status != "orchestration_only":
-        raise ValueError("Chamber 36 must be orchestration_only until synthesis is implemented")
+        raise ValueError("Chamber 36 must stay orchestration_only; synthesis is declared in registry meta")
     invalid_orchestrators = sorted(
         chamber.id
         for chamber in chambers.values()
@@ -605,6 +609,28 @@ def adapter_chamber_01_sist2(chamber: Chamber, query: str, limit: int = 5) -> li
     return evidence_list
 
 
+_CHROMA_CLIENTS: dict[str, Any] = {}
+
+
+def _chroma_client(root: Path):
+    """Jeden klient Chroma na sciezke w danym procesie (telemetria wylaczona, reset zablokowany)."""
+    klucz = str(root)
+    if klucz not in _CHROMA_CLIENTS:
+        settings = None
+        if hasattr(chromadb, "config") and hasattr(chromadb.config, "Settings"):
+            settings = chromadb.config.Settings(
+                is_persistent=True,
+                persist_directory=klucz,
+                anonymized_telemetry=False,
+                allow_reset=False,
+            )
+        _CHROMA_CLIENTS[klucz] = (
+            chromadb.PersistentClient(path=klucz, settings=settings)
+            if settings else chromadb.PersistentClient(path=klucz)
+        )
+    return _CHROMA_CLIENTS[klucz]
+
+
 def adapter_chamber_03_devz_kb(chamber: Chamber, query: str, limit: int = 5) -> list[Evidence]:
     """Chamber 03: ChromaDB DEVz knowledge base."""
     if chromadb is None:
@@ -614,7 +640,7 @@ def adapter_chamber_03_devz_kb(chamber: Chamber, query: str, limit: int = 5) -> 
     if not root.exists():
         raise FileNotFoundError(str(root))
 
-    client = chromadb.PersistentClient(path=str(root))
+    client = _chroma_client(root)
     collections = client.list_collections()
     if not collections:
         return [
@@ -708,7 +734,7 @@ def adapter_chamber_04_hollow_bones(chamber: Chamber, query: str, limit: int = 5
     if not root.exists():
         raise FileNotFoundError(str(root))
 
-    client = chromadb.PersistentClient(path=str(root))
+    client = _chroma_client(root)
     collections = client.list_collections()
     if not collections:
         return [
@@ -1132,86 +1158,9 @@ def log_observatory_events(state: State, result: dict[str, Any]) -> None:
         pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Synteza generatywna (Chamber 36) — ADDYTYWNA, domyslnie OFF.
-# aggregate() pozostaje deterministyczny (kontrakt); synteza doklada cited answer
-# tylko gdy CHAMBERS_SYNTHESIS_ENABLED=1 i skonfigurowany endpoint OpenAI-compatible.
-# ─────────────────────────────────────────────────────────────────────────────
-def _synthesis_enabled() -> bool:
-    return os.getenv("CHAMBERS_SYNTHESIS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def synthesize(result: dict[str, Any], state: State) -> dict[str, Any]:
-    """Dokłada odpowiedz LLM z cytowaniami na wierzch deterministycznego evidence-packa.
-
-    Fail-soft: gdy wylaczone/blad -> zwraca wynik bez zmian (poza polem synthesis).
-    """
-    if not _synthesis_enabled():
-        return result
-    base = (
-        os.getenv("CHAMBERS_SYNTHESIS_BASE_URL")
-        or os.getenv("LLM_BASE_URL")
-        or os.getenv("OPENROUTER_BASE_URL")
-    )
-    key = (
-        os.getenv("CHAMBERS_SYNTHESIS_API_KEY")
-        or os.getenv("LLM_API_KEY")
-        or os.getenv("OPENROUTER_API_KEY")
-    )
-    model = os.getenv("CHAMBERS_SYNTHESIS_MODEL") or os.getenv("LLM_MODEL") or "openrouter/auto"
-    if not base or not key:
-        result["synthesis"] = {
-            "chamber_id": 36,
-            "status": "unavailable",
-            "detail": "brak CHAMBERS_SYNTHESIS_BASE_URL/API_KEY",
-        }
-        return result
-
-    evidence = result.get("sources") or []
-    if not evidence:
-        return result
-
-    ctx = "\n".join(
-        "[{}:{}] {}".format(e.get("chamber_id"), e.get("record_id"), str(e.get("content", ""))[:600])
-        for e in evidence[:ANSWER_EVIDENCE_LIMIT]
-    )
-    prompt = (
-        "Jestes syntezatorem 36 Chambers. Odpowiedz TYLKO na podstawie DOWODOW. "
-        "Kazde twierdzenie oznacz zrodlem jako [chamber:record]. Gdy brak danych - powiedz to wprost.\n\n"
-        "PYTANIE: {}\n\nDOWODY:\n{}\n\nODPOWIEDZ:".format(state.query, ctx)
-    )
-    try:
-        payload = json.dumps(
-            {"model": model, "messages": [{"role": "user", "content": prompt}],
-             "temperature": 0.2, "max_tokens": 700}
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            base.rstrip("/") + "/chat/completions",
-            data=payload,
-            headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
-        )
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
-        if not text:
-            raise RuntimeError("empty synthesis")
-        if "answer_deterministic" not in result:
-            result["answer_deterministic"] = result.get("answer")
-        result["answer"] = text
-        result["answer_mode"] = "synthesis"
-        result["synthesis"] = {
-            "chamber_id": 36,
-            "status": "enabled",
-            "detail": "LLM synthesis over evidence pack",
-            "model": model,
-            "citations": [
-                {"chamber_id": e.get("chamber_id"), "record_id": e.get("record_id")}
-                for e in evidence[:ANSWER_EVIDENCE_LIMIT]
-            ],
-        }
-    except Exception as exc:  # fail-soft: zostaje deterministyczny pack
-        result["synthesis"] = {"chamber_id": 36, "status": "error", "detail": str(exc)[:200]}
-    return result
+# Synteza Chamber 36 zyje w module `synthesis.py` (deterministyczna, ekstrakcyjna).
+# Domyslnie OFF; wlacza ja --synthesize, ktory buduje cited answer WYLACZNIE z evidence packa.
+# Zaden LLM nie generuje prozy — kazde zdanie-roszczenie to doslowny fragment dowodu.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1294,11 +1243,12 @@ def run(
     registry_path: Path | None = DEFAULT_REGISTRY,
     allow_web: bool = False,
     trace_dir: Path | None = DEFAULT_TRACE_DIR,
+    synthesize: bool = False,
 ) -> dict[str, Any]:
     registry_path = registry_path or require_path("CHAMBERS_REGISTRY")
     trace_dir = trace_dir or require_path("CHAMBERS_TRACE_DIR")
     chambers = load_registry(registry_path)
-    state = State(request_id=str(uuid.uuid4()), query=query, allow_web=allow_web)
+    state = State(request_id=str(uuid.uuid4()), query=query, allow_web=allow_web, synthesize=synthesize)
     total_start = now_ms()
     timed(state, "decomposition", lambda: decompose_query(state))
     timed(state, "routing", lambda: route_query(state, chambers))
@@ -1308,7 +1258,15 @@ def run(
     result = timed(state, "aggregation", lambda: aggregate(state))
     state.metrics["total_latency_ms"] = now_ms() - total_start
     result["metrics"] = state.metrics
-    result = synthesize(result, state)
+    if state.synthesize:
+        # Chamber 36: odpowiedz zbudowana wylacznie z dowodow, kazde zdanie z cytatem.
+        # Swiadomie opt-in: domyslny tryb zostaje agregacja dowodow (kontrakt).
+        wynik = synthesis.synthesize(
+            state.evidence, state.query, metrics=state.metrics,
+            policy_blocked=state.policy_blocked,
+        )
+        result.update(wynik)
+        state.metrics["synthesis"] = result["synthesis"]
     write_trace(result, trace_dir)
     log_observatory_events(state, result)
     return result
@@ -1321,6 +1279,8 @@ def main() -> int:
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     parser.add_argument("--allow-web", action="store_true")
     parser.add_argument("--trace-dir", type=Path, default=DEFAULT_TRACE_DIR)
+    parser.add_argument("--synthesize", action="store_true",
+                        help="Chamber 36: ekstrakcyjna odpowiedz z dowodow z cytatami (opt-in)")
     args = parser.parse_args()
     try:
         registry_path = args.registry or require_path("CHAMBERS_REGISTRY")
@@ -1331,7 +1291,7 @@ def main() -> int:
     if not registry_path.exists():
         print(f"Registry not found: {registry_path}", file=sys.stderr)
         return 2
-    res = run(args.query, registry_path, args.allow_web, trace_dir)
+    res = run(args.query, registry_path, args.allow_web, trace_dir, synthesize=args.synthesize)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     return 0
 

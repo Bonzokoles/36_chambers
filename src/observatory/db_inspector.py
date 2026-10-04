@@ -77,7 +77,21 @@ else:
 
     elif config["type"] == "chroma":
         try:
-            client = chromadb.PersistentClient(path=config['path'])
+            settings = (
+                chromadb.config.Settings(
+                    is_persistent=True,
+                    persist_directory=config['path'],
+                    anonymized_telemetry=False,
+                    allow_reset=False,
+                )
+                if hasattr(chromadb, "config") and hasattr(chromadb.config, "Settings")
+                else None
+            )
+            client = (
+                chromadb.PersistentClient(path=config['path'], settings=settings)
+                if settings
+                else chromadb.PersistentClient(path=config['path'])
+            )
             collections = [c.name for c in client.list_collections()]
             if collections:
                 selected_col = st.selectbox("Select Vector Collection:", collections)
